@@ -191,3 +191,23 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .campo input[type="date"] { -webkit-appearance: none; appearance: none; display: block; min-height: 46px; line-height: 1.3; }
 .campo input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
 .campo input[type="date"]::-webkit-calendar-picker-indicator { margin: 0; }
+
+/* mismo tamaño de texto en todas las tarjetas */
+.pad { font-size: 15px; }
+.pad .hint, .pad small { font-size: 13px; }
+/* selector con el mismo estilo que los demás campos (en iPhone se veía distinto) */
+.campo select { -webkit-appearance: none; appearance: none; min-height: 46px; padding-right: 38px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%; background-size: 6px 6px, 6px 6px; background-repeat: no-repeat; }
+
+/* los montos de las cajas del resumen a la misma altura aunque un título ocupe dos líneas */
+.resumen .tile { grid-row: span 3; grid-template-rows: subgrid; row-gap: 4px; }
+/* en formularios de dos columnas, los campos alineados aunque una etiqueta ocupe dos líneas */
+.dos > .campo { grid-row: span 3; display: grid; grid-template-rows: subgrid; row-gap: 5px; }
+.dos { row-gap: 0; }
+/* fecha: mes arriba y día de la semana abajo */
+.fecha .m { display: block; }
+.fecha .w { font-size: 10px; opacity: 0.8; }
+/* botones del formulario: Cancelar y Guardar juntos; Eliminar abajo a lo ancho */
+.form .acciones .btn { flex: 1 1 0; }
+.form .acciones [data-accion="borrar-cuenta"] { order: 3; flex-basis: 100%; }

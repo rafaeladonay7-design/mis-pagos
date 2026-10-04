@@ -176,7 +176,7 @@ function filaPago(p, hoy) {
   const listo = p.pagado || p.pospuesto;
   const boton = listo ? "" : `<button class="btn sm" data-pagar="${esc(k)}">Ya pagué</button>`;
   return `<li class="pago${listo ? " hecho" : ""}">
-    <div class="fecha"><span class="d">${C.DD(p.pago)}</span><span class="m">${C.MESES[C.M(p.pago) - 1]} · ${C.DIAS_TXT[C.wd(p.pago)]}</span></div>
+    <div class="fecha"><span class="d">${C.DD(p.pago)}</span><span class="m">${C.MESES[C.M(p.pago) - 1]}</span><span class="m w">${C.DIAS_TXT[C.wd(p.pago)]}</span></div>
     <button class="info" data-abrir="${esc(k)}" aria-label="Opciones del pago de ${esc(p.nombre)}"><span class="nom">${esc(p.nombre)}</span><span class="det">${partes.join(" · ")}</span>${pill}</button>
     <div class="der"><button class="monto num" data-abrir="${esc(k)}">${p.estimado ? "~" : ""}${C.dinero(p.monto)}</button>${boton}</div></li>`;
 }
@@ -343,7 +343,7 @@ function formCuenta(c, tipo) {
     <label class="campo" for="c-deuda">¿Cuánto debes en total? (opcional)<input id="c-deuda" inputmode="decimal" placeholder="0.00" value="${esc(c.deuda_total ?? "")}"></label>
     <p class="error" id="c-error" hidden></p>
     <div class="acciones">
-      ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-cuenta" style="margin-right:auto">Eliminar</button>`}
+      ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-cuenta">Eliminar</button>`}
       <button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button>
     </div>
   </form>`);

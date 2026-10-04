@@ -1,5 +1,5 @@
 // Primero la red (para tener siempre la versión nueva) y, sin internet, lo guardado.
-const CACHE = "mis-pagos-v11";
+const CACHE = "mis-pagos-v13";
 const ARCHIVOS = ["./", "index.html", "styles.css", "calc.js", "app.js", "firebase-config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
@@ -25,7 +25,7 @@ self.addEventListener("fetch", e => {
   }
   if (url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: "no-cache" })  // siempre revisa si hay versión nueva
       .then(r => { const copia = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copia)); return r; })
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("index.html")))
   );
