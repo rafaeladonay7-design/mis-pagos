@@ -183,15 +183,20 @@
       return { fecha: c, lista, total, libre: ingreso - total };
     });
     // la "vuelta": desde que empiezas a contar hasta que pagaste una vez cada cuenta
+    // Cada vuelta empieza en $0: suma cada cobro y resta cada pago el día que se paga.
     const pend = todos.filter(p => !p.pagado && !p.pospuesto && !p.cubierto && p.pago >= inicio && p.monto > 0);
-    let vuelta = null;
-    const [v1] = vueltas(pend, inicio);
-    if (v1) {
-      const cobrosV = cobrosTodos.filter(c => c <= v1.fin);
-      const cobras = cobrosV.length * ingreso, pagas = v1.pagos.reduce((s, p) => s + p.monto, 0);
-      vuelta = { desde: inicio, fin: v1.fin, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas, pagos: v1.pagos };
-    }
-    return { hoy, inicio, ingreso, pagos, cobros, sinCobro, vuelta };
+    const detalle = vueltas(pend, inicio).filter(v => v.fin <= add(hasta, 35)).map(v => {
+      const cobrosV = cobrosTodos.filter(c => c >= v.desde && c <= v.fin);
+      const ev = [...cobrosV.map(c => ({ fecha: c, tipo: "cobro", nombre: "Cobro", monto: ingreso })),
+                  ...v.pagos.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.monto, pago: p }))]
+        .sort((a, b) => a.fecha - b.fecha || (a.tipo === "cobro" ? -1 : 1));  // el cobro del día entra antes de pagar
+      let saldo = 0, minimo = 0;
+      for (const e of ev) { saldo += e.tipo === "cobro" ? e.monto : -e.monto; e.saldo = saldo; minimo = Math.min(minimo, saldo); }
+      const cobras = cobrosV.length * ingreso, pagas = v.pagos.reduce((s, p) => s + p.monto, 0);
+      return { desde: v.desde, fin: v.fin, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas, pagos: v.pagos, eventos: ev, minimo };
+    });
+    const vuelta = detalle[0] || null;
+    return { hoy, inicio, ingreso, pagos, cobros, sinCobro, vuelta, vueltas: detalle };
   }
 
   // ---------- calendario (.ics) ----------
@@ -214,7 +219,7 @@
       evento(p.pago, `💳 Pagar ${p.nombre} ${p.estimado ? "~" : ""}${dinero(p.monto)}`, desc.join("\n"),
         `pago-${p.cuenta.id}-${p.clave}`);
     }
-    for (const c of P.cobros) {
+    for (const c of cfg.modo_reparto === "al_final" ? P.cobros : []) {
       if (!c.lista.length) continue;
       evento(c.fecha, `💰 Cobro: aparta ${dinero(c.total)}`, c.lista.map(([n, x]) => `${n}: ${dinero(x)}`).join("\n") +
         `\nTe queda libre: ${dinero(c.libre)}`, `cobro-${iso(c.fecha)}`);

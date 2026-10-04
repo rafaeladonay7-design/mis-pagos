@@ -219,3 +219,15 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .linea-cuenta b { white-space: nowrap; }
 .linea-cuenta.total { border-top: 1px solid var(--line); padding-top: 8px; font-size: 17px; }
 .linea-cuenta.total span { color: var(--fg); font-weight: 600; }
+
+/* movimientos de la vuelta: fecha, concepto, monto y lo que llevas */
+.mov { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-areas: "f n m" "f s s"; gap: 2px 10px; padding: 12px 16px; align-items: baseline; }
+.mov + .mov { border-top: 1px solid var(--line); }
+.mfecha { grid-area: f; font-size: 13px; color: var(--muted); }
+.mnom { grid-area: n; font-weight: 600; min-width: 0; }
+.mmonto { grid-area: m; font-weight: 700; white-space: nowrap; }
+.msaldo { grid-area: s; justify-self: end; font-size: 13px; color: var(--muted); }
+.mov.cobro .mnom { font-weight: 400; color: var(--muted); }
+.msaldo.neg { background: var(--fg); color: var(--surface); padding: 0 6px; border-radius: 6px; }
+.mov.total { grid-template-areas: "n s"; grid-template-columns: minmax(0, 1fr) auto; background: var(--accent-soft); border-radius: 0 0 15px 15px; }
+.mov.total .mnom, .mov.total .msaldo { font-size: 16px; font-weight: 700; color: var(--fg); justify-self: auto; }

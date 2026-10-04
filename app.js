@@ -137,7 +137,8 @@ function inicio() {
   h += proximo
     ? `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big num">${C.dinero(proximo.monto)}</span><span class="sub">${esc(proximo.nombre)} · ${C.fmt(proximo.pago)} (${cuando(hoy, proximo.pago)})</span></div>`
     : `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big">Nada pendiente</span></div>`;
-  if (proxCobro) h += `<div class="tile"><span class="lbl">Apartas el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.total)}</span><span class="sub">${proxCobro.libre > 0.005 ? `te quedan ${C.dinero(proxCobro.libre)}` : "todo va a pagos"}</span></div>`;
+  if (proxCobro && S.modo_reparto === "al_final") h += `<div class="tile"><span class="lbl">Libre el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.libre)}</span><span class="sub">de ${C.dinero(P.ingreso)}</span></div>`;
+  else if (proxCobro && V) h += `<div class="tile"><span class="lbl">Pagas hasta el ${C.fmt(V.fin)}</span><span class="big num">${C.dinero(V.pagas)}</span><span class="sub">${V.pagos.length} ${V.pagos.length === 1 ? "pago" : "pagos"}</span></div>`;
   if (V) h += `<div class="tile"><span class="lbl">Te sobra al ${C.fmt(V.fin)}</span><span class="big num">${C.dinero(V.sobra)}</span><span class="sub">ya con todo pagado</span></div>`;
   else h += `<div class="tile"><span class="lbl">Te sobra en ${C.MESES_LARGO[C.M(mesRef) - 1]}</span><span class="big num">${C.dinero(libreMes)}</span><span class="sub">con todo pagado</span></div>`;
   if (deuda > 0) h += `<div class="tile" style="grid-column:1/-1"><span class="lbl">Deuda total</span><span class="big num">${C.dinero(deuda)}</span><span class="sub">suma de lo que debes en tus cuentas</span></div>`;
@@ -149,9 +150,11 @@ function inicio() {
     <div class="linea-cuenta"><span>Pagas (${V.pagos.map(p => esc(p.nombre)).join(", ")})</span><b>− ${C.dinero(V.pagas)}</b></div>
     <div class="linea-cuenta total"><span>Te sobra</span><b>${C.dinero(V.sobra)}</b></div>
   </section>`;
-  for (const p of P.sinCobro) h += `<div class="aviso">Antes de tu próximo cobro tienes que pagar ${esc(p.nombre)}: te faltan ${C.dinero(p.falta)}.</div>`;
-  const negativos = P.cobros.filter(c => c.libre < -0.005);
-  if (negativos.length) h += `<div class="aviso">No te alcanza el cobro del ${negativos.map(c => C.fmt(c.fecha)).join(", ")}. Revisa la pestaña Cobros.</div>`;
+  if (S.modo_reparto === "al_final") for (const p of P.sinCobro) h += `<div class="aviso">Antes de tu próximo cobro tienes que pagar ${esc(p.nombre)}: te faltan ${C.dinero(p.falta)}.</div>`;
+  if (S.modo_reparto === "al_final") {
+    const negativos = P.cobros.filter(c => c.libre < -0.005);
+    if (negativos.length) h += `<div class="aviso">No te alcanza el cobro del ${negativos.map(c => C.fmt(c.fecha)).join(", ")}. Revisa la pestaña Cobros.</div>`;
+  } else if (P.vueltas.some(v => v.minimo < -0.005)) h += `<div class="aviso">Hay un pago que llega antes de que te alcance. Revisa la pestaña Cobros.</div>`;
 
   h += `<section class="sec"><div class="sec-head"><h2>Próximos pagos</h2><span class="hint">Toca un pago para cambiarlo</span></div><ul class="lista card">`;
   let mes = -1;
@@ -198,7 +201,31 @@ function cobros() {
   let h = `<header class="top"><h1>Cobros</h1><p>${esc(textoIngreso(S.ingreso))}</p></header>`;
   if (!hecho()) return h + `<div class="card vacio"><p>Configura tu ingreso y al menos una cuenta para ver tus cobros.</p><button class="btn" data-ir="cuentas">Ir a Cuentas</button></div>`;
   const P = C.plan(S);
-  h += `<p class="hint">${S.modo_reparto === "al_final" ? "Cada pago sale de los cobros más cercanos a su fecha; lo que sobra queda en los primeros cobros." : "Cada cobro se usa primero para pagar; lo que sobra queda al final, cuando ya pagaste todo."}${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
+  return h + (S.modo_reparto === "al_final" ? cobrosPorSemana(P) : cobrosPorVuelta(P));
+}
+
+// Empieza en $0, suma cada cobro y resta cada pago el día que toca.
+function cobrosPorVuelta(P) {
+  let h = `<p class="hint">Empiezas en $0, sumas cada cobro y restas cada pago el día que toca. Lo que queda al final es lo que te sobra.${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
+  if (!P.vueltas.length) return h + `<div class="card vacio"><p>No tienes pagos pendientes.</p></div>`;
+  P.vueltas.forEach((v, i) => {
+    h += `<section class="sec"><div class="sec-head"><h2>${i === 0 ? "Esta vuelta" : "Siguiente vuelta"}</h2><span class="hint">${C.fmt(v.desde)} → ${C.fmt(v.fin)}</span></div><div class="card">`;
+    for (const e of v.eventos) {
+      const neg = e.saldo < -0.005;
+      h += `<div class="mov ${e.tipo}"><span class="mfecha">${C.fmt(e.fecha)}</span>
+        <span class="mnom">${e.tipo === "cobro" ? "Cobro" : `Pagas ${esc(e.nombre)}`}</span>
+        <span class="mmonto num">${e.tipo === "cobro" ? "+" : "−"}${C.dinero(e.monto)}</span>
+        <span class="msaldo num${neg ? " neg" : ""}">${neg ? `te faltan ${C.dinero(-e.saldo)}` : `llevas ${C.dinero(e.saldo)}`}</span></div>`;
+    }
+    h += `<div class="mov total"><span class="mnom">Te sobra al ${C.fmt(v.fin)}</span><span class="msaldo num">${C.dinero(v.sobra)}</span></div></div>`;
+    if (v.minimo < -0.005) h += `<div class="aviso">En esta vuelta hay un pago antes de que te alcance. Revisa los renglones que dicen “te faltan”.</div>`;
+    h += `</section>`;
+  });
+  return h;
+}
+
+function cobrosPorSemana(P) {
+  let h = `<p class="hint">Cada pago sale de los cobros más cercanos a su fecha; lo que sobra queda en los primeros cobros.${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
   h += `<section class="sec"><h2>Cada cobro</h2><div class="card">`;
   for (const c of P.cobros) {
     const pct = Math.max(0, Math.min(100, (c.total / P.ingreso) * 100));
@@ -210,17 +237,6 @@ function cobros() {
       <span class="desg num">${desg}</span></div>`;
   }
   h += `</div></section>`;
-
-  const meses = new Map();
-  for (const c of P.cobros) {
-    const k = `${C.Y(c.fecha)}-${C.M(c.fecha)}`;
-    const v = meses.get(k) || { m: C.M(c.fecha), cobras: 0, vence: 0, libre: 0 };
-    v.cobras += P.ingreso; v.libre += c.libre; meses.set(k, v);
-  }
-  for (const p of P.pagos) { const v = meses.get(`${C.Y(p.pago)}-${C.M(p.pago)}`); if (v) v.vence += p.monto; }
-  h += `<section class="sec"><h2>Por mes</h2><div class="card tabla-wrap"><table class="num"><thead><tr><th>Mes</th><th>Cobras</th><th>Vence</th><th>Te sobra</th></tr></thead><tbody>`;
-  for (const v of meses.values()) h += `<tr><td>${C.MESES_LARGO[v.m - 1]}</td><td>${C.dinero(v.cobras)}</td><td>${C.dinero(v.vence)}</td><td class="sobra">${C.dinero(v.libre)}</td></tr>`;
-  h += `</tbody></table></div><p class="hint">“Te sobra” es lo libre de los cobros de ese mes, ya con todo pagado.</p></section>`;
   return h;
 }
 
