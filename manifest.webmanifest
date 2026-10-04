@@ -1,0 +1,17 @@
+{
+  "name": "Mis Pagos",
+  "short_name": "Mis Pagos",
+  "description": "Organiza tus tarjetas, fechas de corte y pagos. Paga siempre el último día y ve cuánto te sobra de cada cobro.",
+  "lang": "es-MX",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f2f2",
+  "theme_color": "#111111",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
