@@ -211,3 +211,11 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* botones del formulario: Cancelar y Guardar juntos; Eliminar abajo a lo ancho */
 .form .acciones .btn { flex: 1 1 0; }
 .form .acciones [data-accion="borrar-cuenta"] { order: 3; flex-basis: 100%; }
+
+/* cuenta hasta el último pago */
+.vuelta { gap: 8px; }
+.linea-cuenta { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.linea-cuenta span { color: var(--muted); min-width: 0; }
+.linea-cuenta b { white-space: nowrap; }
+.linea-cuenta.total { border-top: 1px solid var(--line); padding-top: 8px; font-size: 17px; }
+.linea-cuenta.total span { color: var(--fg); font-weight: 600; }

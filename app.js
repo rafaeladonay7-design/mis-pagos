@@ -132,15 +132,23 @@ function inicio() {
   const libreMes = P.cobros.filter(c => C.M(c.fecha) === C.M(mesRef) && C.Y(c.fecha) === C.Y(mesRef)).reduce((s, c) => s + c.libre, 0);
   const deuda = S.cuentas.reduce((s, c) => s + (Number(c.deuda_total) || 0), 0);
 
+  const V = P.vuelta;
   h += `<section class="resumen" aria-label="Resumen">`;
   h += proximo
     ? `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big num">${C.dinero(proximo.monto)}</span><span class="sub">${esc(proximo.nombre)} · ${C.fmt(proximo.pago)} (${cuando(hoy, proximo.pago)})</span></div>`
     : `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big">Nada pendiente</span></div>`;
-  if (proxCobro) h += `<div class="tile"><span class="lbl">Libre el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.libre)}</span><span class="sub">de ${C.dinero(P.ingreso)}</span></div>`;
-  h += `<div class="tile"><span class="lbl">Te sobra en ${C.MESES_LARGO[C.M(mesRef) - 1]}</span><span class="big num">${C.dinero(libreMes)}</span><span class="sub">con todo pagado</span></div>`;
+  if (proxCobro) h += `<div class="tile"><span class="lbl">Apartas el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.total)}</span><span class="sub">${proxCobro.libre > 0.005 ? `te quedan ${C.dinero(proxCobro.libre)}` : "todo va a pagos"}</span></div>`;
+  if (V) h += `<div class="tile"><span class="lbl">Te sobra al ${C.fmt(V.fin)}</span><span class="big num">${C.dinero(V.sobra)}</span><span class="sub">ya con todo pagado</span></div>`;
+  else h += `<div class="tile"><span class="lbl">Te sobra en ${C.MESES_LARGO[C.M(mesRef) - 1]}</span><span class="big num">${C.dinero(libreMes)}</span><span class="sub">con todo pagado</span></div>`;
   if (deuda > 0) h += `<div class="tile" style="grid-column:1/-1"><span class="lbl">Deuda total</span><span class="big num">${C.dinero(deuda)}</span><span class="sub">suma de lo que debes en tus cuentas</span></div>`;
   h += `</section>`;
 
+  if (V) h += `<section class="card pad stack vuelta num" aria-label="Cuenta hasta tu último pago">
+    <div class="sec-head"><h3>Del ${C.fmt(V.desde)} al ${C.fmt(V.fin)}</h3><span class="hint">hasta pagar todo una vez</span></div>
+    <div class="linea-cuenta"><span>Cobras (${V.cobros} ${V.cobros === 1 ? "cobro" : "cobros"})</span><b>${C.dinero(V.cobras)}</b></div>
+    <div class="linea-cuenta"><span>Pagas (${V.pagos.map(p => esc(p.nombre)).join(", ")})</span><b>− ${C.dinero(V.pagas)}</b></div>
+    <div class="linea-cuenta total"><span>Te sobra</span><b>${C.dinero(V.sobra)}</b></div>
+  </section>`;
   for (const p of P.sinCobro) h += `<div class="aviso">Antes de tu próximo cobro tienes que pagar ${esc(p.nombre)}: te faltan ${C.dinero(p.falta)}.</div>`;
   const negativos = P.cobros.filter(c => c.libre < -0.005);
   if (negativos.length) h += `<div class="aviso">No te alcanza el cobro del ${negativos.map(c => C.fmt(c.fecha)).join(", ")}. Revisa la pestaña Cobros.</div>`;
@@ -190,7 +198,7 @@ function cobros() {
   let h = `<header class="top"><h1>Cobros</h1><p>${esc(textoIngreso(S.ingreso))}</p></header>`;
   if (!hecho()) return h + `<div class="card vacio"><p>Configura tu ingreso y al menos una cuenta para ver tus cobros.</p><button class="btn" data-ir="cuentas">Ir a Cuentas</button></div>`;
   const P = C.plan(S);
-  h += `<p class="hint">Cada pago sale de los cobros más cercanos a su fecha. Lo que no se necesita te queda libre.${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
+  h += `<p class="hint">${S.modo_reparto === "al_final" ? "Cada pago sale de los cobros más cercanos a su fecha; lo que sobra queda en los primeros cobros." : "Cada cobro se usa primero para pagar; lo que sobra queda al final, cuando ya pagaste todo."}${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
   h += `<section class="sec"><h2>Cada cobro</h2><div class="card">`;
   for (const c of P.cobros) {
     const pct = Math.max(0, Math.min(100, (c.total / P.ingreso) * 100));
@@ -247,6 +255,12 @@ function ajustes() {
     <label class="campo" for="aj-regla">Si la fecha límite cae en fin de semana o día festivo
       <select id="aj-regla">${Object.entries(reglas).map(([k, v]) => `<option value="${k}" ${S.regla_pago === k ? "selected" : ""}>${v}</option>`).join("")}</select>
       <small>En México los bancos recorren la fecha límite al siguiente día hábil.</small></label>
+    <label class="campo" for="aj-modo">¿Cuándo quieres que te sobre el dinero?
+      <select id="aj-modo">
+        <option value="primero" ${S.modo_reparto !== "al_final" ? "selected" : ""}>Al final, ya con todo pagado</option>
+        <option value="al_final" ${S.modo_reparto === "al_final" ? "selected" : ""}>Al principio, y pagar con los últimos cobros</option>
+      </select>
+      <small>“Al final” usa cada cobro primero para pagar. “Al principio” te deja libre el dinero de los primeros cobros.</small></label>
     <label class="check"><input type="checkbox" id="aj-feriados" ${S.feriados_mexico !== false ? "checked" : ""}> Contar los días festivos bancarios de México</label>
     <label class="campo" for="aj-desde">Empezar a contar cobros desde
       <input type="date" id="aj-desde" value="${esc(S.contar_desde || "")}">
@@ -575,6 +589,7 @@ function normalizar(d) {
   return {
     version: 1, ingreso, regla_pago: REGLAS.includes(d.regla_pago) ? d.regla_pago : "siguiente_habil",
     feriados_mexico: d.feriados_mexico !== false, contar_desde: fecha(d.contar_desde), cuentas,
+    modo_reparto: d.modo_reparto === "al_final" ? "al_final" : "primero",
   };
 }
 const normalizarSeguro = d => { try { return d ? normalizar(d) : null; } catch { return null; } };
@@ -674,6 +689,7 @@ document.addEventListener("submit", e => {
 document.addEventListener("change", e => {
   if (!S) return;
   if (e.target.id === "aj-regla") { S.regla_pago = e.target.value; guardar("Guardado"); }
+  if (e.target.id === "aj-modo") { S.modo_reparto = e.target.value; guardar("Guardado"); }
   if (e.target.id === "aj-feriados") { S.feriados_mexico = e.target.checked; guardar("Guardado"); }
   if (e.target.id === "aj-desde") { S.contar_desde = e.target.value || null; guardar("Guardado"); }
 });

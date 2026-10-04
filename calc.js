@@ -124,16 +124,25 @@
     return out.sort((a, b) => a - b);
   }
 
-  // Cada pago sale de los cobros más cercanos antes de su fecha, así las semanas
-  // anteriores quedan libres. Se reparte del pago más lejano al más cercano.
-  function repartir(pagos, cobros, inicio, ingreso) {
+  // modo 'primero': cada cobro se usa primero para pagar (empezando por el pago más
+  // cercano) y lo que sobra se junta al final, cuando ya está todo pagado.
+  // modo 'al_final': cada pago sale de los cobros más cercanos a su fecha, así las
+  // primeras semanas quedan libres.
+  function repartir(pagos, cobros, inicio, ingreso, modo) {
     const usado = new Map(cobros.map(c => [+c, 0])), aparta = new Map(cobros.map(c => [+c, []]));
     const sinCobro = [];
     const pendientes = pagos.filter(p => !p.pagado && !p.pospuesto && !p.cubierto && p.pago >= inicio && p.monto > 0);
-    for (const p of [...pendientes].sort((a, b) => b.pago - a.pago)) {
-      const ventana = cobros.filter(c => c >= inicio && c <= p.pago);
+    const primero = modo !== "al_final";
+    // en modo 'primero' cada pago solo usa cobros de su propia vuelta, para que lo
+    // que sobra al final de una vuelta no se vaya a adelantar la siguiente
+    const desdeDe = new Map();
+    if (primero) for (const r of vueltas(pendientes, inicio)) for (const p of r.pagos) desdeDe.set(p, r.desde);
+    const orden = [...pendientes].sort((a, b) => (primero ? a.pago - b.pago : b.pago - a.pago));
+    for (const p of orden) {
+      const desde = primero ? desdeDe.get(p) : inicio;
+      const ventana = cobros.filter(c => c >= desde && c <= p.pago);
       let resta = p.monto;
-      for (const c of [...ventana].reverse()) {
+      for (const c of primero ? ventana : [...ventana].reverse()) {
         const tomar = Math.min(resta, ingreso - usado.get(+c));
         if (tomar > 0.005) { usado.set(+c, usado.get(+c) + tomar); resta -= tomar; aparta.get(+c).push([p.nombre, tomar]); }
       }
@@ -145,6 +154,21 @@
     return { aparta, sinCobro };
   }
 
+  // Una vuelta va desde 'desde' hasta que cada cuenta se pagó una vez.
+  function vueltas(pendientes, inicio) {
+    const out = [];
+    let resto = [...pendientes].sort((a, b) => a.pago - b.pago), desde = inicio;
+    while (resto.length) {
+      const primeros = new Map();
+      for (const p of resto) if (!primeros.has(p.cuenta.id)) primeros.set(p.cuenta.id, p);
+      const fin = new Date(Math.max(...[...primeros.values()].map(p => +p.pago)));
+      out.push({ desde, fin, pagos: resto.filter(p => p.pago <= fin) });
+      resto = resto.filter(p => p.pago > fin);
+      desde = add(fin, 1);
+    }
+    return out;
+  }
+
   function plan(cfg, hoy = hoyLocal(), dias = 120) {
     const hasta = add(hoy, dias);
     const inicio = cfg.contar_desde && parse(cfg.contar_desde) > hoy ? parse(cfg.contar_desde) : hoy;
@@ -152,13 +176,22 @@
     // un mes extra para que los últimos cobros ya tomen en cuenta los pagos siguientes
     const todos = calcularPagos(cfg, hoy, add(hasta, 35));
     const cobrosTodos = calcularCobros(cfg, inicio, add(hasta, 35));
-    const { aparta, sinCobro } = repartir(todos, cobrosTodos, inicio, ingreso);
+    const { aparta, sinCobro } = repartir(todos, cobrosTodos, inicio, ingreso, cfg.modo_reparto);
     const pagos = todos.filter(p => p.pago <= hasta);
     const cobros = cobrosTodos.filter(c => c <= hasta).map(c => {
       const lista = aparta.get(+c), total = lista.reduce((s, [, x]) => s + x, 0);
       return { fecha: c, lista, total, libre: ingreso - total };
     });
-    return { hoy, inicio, ingreso, pagos, cobros, sinCobro };
+    // la "vuelta": desde que empiezas a contar hasta que pagaste una vez cada cuenta
+    const pend = todos.filter(p => !p.pagado && !p.pospuesto && !p.cubierto && p.pago >= inicio && p.monto > 0);
+    let vuelta = null;
+    const [v1] = vueltas(pend, inicio);
+    if (v1) {
+      const cobrosV = cobrosTodos.filter(c => c <= v1.fin);
+      const cobras = cobrosV.length * ingreso, pagas = v1.pagos.reduce((s, p) => s + p.monto, 0);
+      vuelta = { desde: inicio, fin: v1.fin, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas, pagos: v1.pagos };
+    }
+    return { hoy, inicio, ingreso, pagos, cobros, sinCobro, vuelta };
   }
 
   // ---------- calendario (.ics) ----------
