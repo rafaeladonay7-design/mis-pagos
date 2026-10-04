@@ -238,13 +238,13 @@ function cuentas() {
 }
 
 function ajustes() {
-  const reglas = { siguiente_habil: "Si cae en fin de semana o día festivo, pagar el siguiente día hábil", ultimo_habil: "Si cae en fin de semana o día festivo, pagar el día hábil anterior", exacto: "Pagar siempre el día exacto" };
+  const reglas = { siguiente_habil: "Pagar el siguiente día hábil", ultimo_habil: "Pagar el día hábil anterior", exacto: "Pagar el día exacto" };
   let h = `<header class="top"><h1>Ajustes</h1></header>`;
   if (usuario) h += `<section class="sec"><h2>Tu cuenta</h2><div class="card pad stack">
     <p>Entraste como <b>${esc(usuario.email || usuario.displayName || "")}</b>. Tus datos se guardan en tu cuenta y se ven igual en todos tus dispositivos.</p>
     <div class="row"><button class="btn ghost" data-accion="salir">Cerrar sesión</button></div></div></section>`;
   h += `<section class="sec"><h2>Cómo pagar</h2><div class="card pad stack">
-    <label class="campo" for="aj-regla">Cuando la fecha límite cae en día inhábil
+    <label class="campo" for="aj-regla">Si la fecha límite cae en fin de semana o día festivo
       <select id="aj-regla">${Object.entries(reglas).map(([k, v]) => `<option value="${k}" ${S.regla_pago === k ? "selected" : ""}>${v}</option>`).join("")}</select>
       <small>En México los bancos recorren la fecha límite al siguiente día hábil.</small></label>
     <label class="check"><input type="checkbox" id="aj-feriados" ${S.feriados_mexico !== false ? "checked" : ""}> Contar los días festivos bancarios de México</label>

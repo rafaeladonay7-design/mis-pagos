@@ -181,3 +181,13 @@ dialog::backdrop { background: rgb(8 12 20 / 0.5); }
 .o { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
 .o::before, .o::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .enlace { background: none; border: 0; padding: 4px 0; font: inherit; font-size: 14px; font-weight: 600; color: var(--fg); text-decoration: underline; cursor: pointer; }
+
+/* celular: que nada sea más ancho que la pantalla (evita el zoom de iPhone) */
+html, body { max-width: 100%; overflow-x: hidden; }
+.stack > *, .sec > *, .campo, .dos > * { min-width: 0; }
+.campo input, .campo select, .campo textarea { min-width: 0; max-width: 100%; }
+.campo select { text-overflow: ellipsis; }
+/* Safari en iPhone ignora el ancho de los campos de fecha */
+.campo input[type="date"] { -webkit-appearance: none; appearance: none; display: block; min-height: 46px; line-height: 1.3; }
+.campo input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+.campo input[type="date"]::-webkit-calendar-picker-indicator { margin: 0; }
