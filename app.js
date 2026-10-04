@@ -92,7 +92,8 @@ function bienvenida() {
       <button class="btn block" data-accion="empezar">Empezar</button>
       <button class="btn ghost block" data-accion="importar">Tengo un respaldo</button>
     </div>
-    <p class="hint">${usuario ? `Entraste como ${esc(usuario.email || "")}. Tus datos se guardan en tu cuenta y solo tú los ves.` : "Tus datos se guardan solo en este teléfono. Nadie más los ve."}</p>
+    <p class="hint">${usuario ? `Entraste como <b>${esc(usuario.email || "")}</b>. Tus datos se guardan en tu cuenta y solo tú los ves.` : "Tus datos se guardan solo en este teléfono. Nadie más los ve."}</p>
+    ${usuario ? `<button class="enlace" data-accion="salir">¿No es tu cuenta? Cerrar sesión</button>` : ""}
   </section>`;
 }
 
