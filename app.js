@@ -435,6 +435,7 @@ function formCuenta(c, tipo) {
   const esTarjeta = c.tipo === "tarjeta";
   const prox = nueva ? null : proximoCiclo(c);
   const proxMonto = prox ? (prox.estimado ? "" : prox.base) : "";
+  const ciclos = esTarjeta && !nueva ? ciclosParaMeses(c) : [];
   abrir(`<form class="form" id="f-cuenta" data-id="${esc(c.id || "")}" data-tipo="${esc(c.tipo)}" novalidate>
     <h2>${nueva ? (esTarjeta ? "Nueva tarjeta" : "Nuevo pago fijo") : esc(c.nombre)}</h2>
     <label class="campo" for="c-nombre">Nombre<input id="c-nombre" autocomplete="off" placeholder="${esTarjeta ? "Ej. BBVA Azul" : "Ej. Préstamo, Mercado Pago"}" value="${esc(c.nombre || "")}"></label>
@@ -457,6 +458,7 @@ function formCuenta(c, tipo) {
         <small>Solo si este mes es distinto. Sin contar las compras que registras aparte.</small></label>
     </div>
     <label class="campo" for="c-deuda">¿Cuánto debes en total? (opcional)<input id="c-deuda" inputmode="decimal" placeholder="0.00" value="${esc(c.deuda_total ?? "")}"></label>
+    ${esTarjeta && !nueva && ciclos.length ? `<hr class="sep">${htmlAMeses(c, ciclos)}` : ""}
     <p class="error" id="c-error" hidden></p>
     <div class="acciones">
       ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-cuenta">Eliminar</button>`}
@@ -467,6 +469,7 @@ function formCuenta(c, tipo) {
     const sync = () => { const v = dlg.querySelector("input[name=c-ltipo]:checked").value; dlg.querySelectorAll("[data-lt]").forEach(e => e.hidden = e.dataset.lt !== v); };
     dlg.querySelectorAll("input[name=c-ltipo]").forEach(r => r.addEventListener("change", sync)); sync();
   }
+  if (ciclos.length) activarAMeses(ciclos);
 }
 
 function guardarCuenta(form) {
@@ -582,18 +585,7 @@ function formPago(k) {
         <label class="campo" for="p-monto">Cambiar el monto de este pago<input id="p-monto" inputmode="decimal" value="${esc(p.monto)}"></label>
         <button type="button" class="btn ghost" data-accion="pago-monto">Guardar</button>
       </div>
-      ${c.tipo === "tarjeta" && p.base > 0 ? `<button type="button" class="btn ghost block" data-op="ameses">Pasar a meses una compra de este pago</button>
-      <div class="caja" data-panel="ameses" hidden>
-        <p class="hint">Para una compra que ya viene dentro de este pago (${C.dinero(p.base)}). Se resta de este pago y se divide en mensualidades desde este mismo pago.</p>
-        <label class="campo" for="m-desc">¿Qué compra es? (opcional)<input id="m-desc" autocomplete="off" placeholder="Ej. Liverpool"></label>
-        <div class="dos">
-          <label class="campo" for="m-monto">Monto de la compra<input id="m-monto" inputmode="decimal" placeholder="0.00"><small>Máximo ${C.dinero(p.base)}.</small></label>
-          <label class="campo" for="m-meses">¿A cuántos meses?<select id="m-meses">${[3, 6, 9, 12, 18, 24].map(n => `<option value="${n}">${n} meses</option>`).join("")}</select><small>Los que te dé tu banco.</small></label>
-        </div>
-        <p class="hint" id="m-vista">Pon el monto para ver cómo queda.</p>
-        <p class="hint">Si tu banco cobra intereses por pasarla a meses, pon el total con intereses que te indique.</p>
-        <button type="button" class="btn" data-accion="pago-ameses">Pasar a meses</button>
-      </div>` : ""}
+      ${c.tipo === "tarjeta" && p.base > 0 ? htmlAMeses(c, [p]) : ""}
       ${c.tipo === "tarjeta" ? `<button type="button" class="btn ghost block" data-compra-nueva="${esc(c.id)}">+ Agregar una compra con esta tarjeta</button>
         <p class="hint">Pones la fecha y si es a meses, y se suma sola al estado de cuenta que le toca.</p>` : `
       <div class="linea">
@@ -604,16 +596,58 @@ function formPago(k) {
       <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cerrar</button></div>`;
   }
   abrir(`<form class="form" id="f-pago" data-k="${esc(k)}" novalidate>${titulo}${cuerpo}</form>`);
-  const mm = $("#m-monto");
-  if (mm) {
-    const vista = () => {
-      const x = numero(mm.value), n = parseInt($("#m-meses").value, 10);
-      $("#m-vista").textContent = x > 0 && x <= p.base
-        ? `Este pago queda en ${C.dinero(p.monto - x + Math.floor((x / n) * 100) / 100)} y pagarás ${C.dinero(Math.floor((x / n) * 100) / 100)} al mes por ${n} meses.`
-        : x > p.base ? `No puede ser más de ${C.dinero(p.base)}.` : "Pon el monto para ver cómo queda.";
-    };
-    mm.addEventListener("input", vista); $("#m-meses").addEventListener("change", vista);
-  }
+  if (c.tipo === "tarjeta" && p.base > 0) activarAMeses([p]);
+}
+
+// ---------- pasar a meses una compra que ya viene en un pago ----------
+function ciclosParaMeses(c) {
+  const hoy = C.hoyLocal();
+  return C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, 100)).filter(p => !p.pagado && !p.pospuesto && p.base > 0).slice(0, 3);
+}
+function htmlAMeses(c, ciclos) {
+  const uno = ciclos.length === 1;
+  return `<button type="button" class="btn ghost block" data-op="ameses">Pasar a meses una compra${uno ? " de este pago" : ""}</button>
+    <div class="caja" data-panel="ameses" data-cuenta="${esc(c.id)}" hidden>
+      <p class="hint">Para una compra que ya viene dentro de tu pago. Se resta de ese pago y se divide en mensualidades desde ese mismo pago.</p>
+      ${uno ? `<input type="hidden" id="m-ciclo" value="${esc(ciclos[0].clave)}">`
+            : `<label class="campo" for="m-ciclo">¿De qué pago sale?<select id="m-ciclo">${ciclos.map(q => `<option value="${esc(q.clave)}">${C.fmt(q.limite)} · ${C.dinero(q.monto)}</option>`).join("")}</select></label>`}
+      <label class="campo" for="m-desc">¿Qué compra es? (opcional)<input id="m-desc" autocomplete="off" placeholder="Ej. Liverpool"></label>
+      <div class="dos">
+        <label class="campo" for="m-monto">Monto de la compra<input id="m-monto" inputmode="decimal" placeholder="0.00"><small id="m-max"></small></label>
+        <label class="campo" for="m-meses">¿A cuántos meses?<select id="m-meses">${[3, 6, 9, 12, 18, 24].map(n => `<option value="${n}">${n} meses</option>`).join("")}</select><small>Los que te dé tu banco.</small></label>
+      </div>
+      <p class="hint" id="m-vista"></p>
+      <p class="hint">Si tu banco cobra intereses por pasarla a meses, pon el total con intereses que te indique.</p>
+      <p class="error" id="m-error" hidden></p>
+      <button type="button" class="btn" data-accion="aplicar-ameses">Pasar a meses</button>
+    </div>`;
+}
+let ciclosAMeses = [];
+function activarAMeses(ciclos) {
+  ciclosAMeses = ciclos;
+  const vista = () => {
+    const p = ciclosAMeses.find(q => q.clave === $("#m-ciclo").value) || ciclosAMeses[0];
+    const x = numero($("#m-monto").value), n = parseInt($("#m-meses").value, 10), cuota = Math.floor((x / n) * 100) / 100;
+    $("#m-max").textContent = `Máximo ${C.dinero(p.base)}.`;
+    $("#m-vista").textContent = x > 0 && x <= p.base + 0.005
+      ? `Ese pago queda en ${C.dinero(p.monto - x + cuota)} y pagarás ${C.dinero(cuota)} al mes por ${n} meses.`
+      : x > p.base ? `No puede ser más de ${C.dinero(p.base)}.` : "Pon el monto para ver cómo queda.";
+  };
+  ["m-monto", "m-meses", "m-ciclo"].forEach(id => { const e = $("#" + id); e.addEventListener("input", vista); e.addEventListener("change", vista); });
+  vista();
+}
+function aplicarAMeses() {
+  const panel = dlg.querySelector("[data-panel=ameses]"), c = S.cuentas.find(x => x.id === panel.dataset.cuenta);
+  const err = $("#m-error"), fallo = t => { err.textContent = t; err.hidden = false; };
+  const p = c && ciclosAMeses.find(q => q.clave === $("#m-ciclo").value);
+  if (!p) return fallo("No encontré ese pago. Cierra y vuelve a abrir.");
+  const x = redondear(numero($("#m-monto").value)), n = parseInt($("#m-meses").value, 10);
+  if (!(x > 0)) return fallo("Escribe el monto de la compra.");
+  if (x > p.base + 0.005) return fallo(`No puede ser más de ${C.dinero(p.base)}, lo que trae ese pago sin contar otras compras.`);
+  c.montos = { ...(c.montos || {}), [p.clave]: redondear(p.base - x) };
+  c.compras = [...(c.compras || []), { id: nuevoId(), fecha: C.iso(p.corte), descripcion: $("#m-desc").value.trim().slice(0, 60) || "Pasada a meses", monto: x, meses: n, de_estado: p.clave }];
+  cerrar();
+  guardar(`Listo: ${C.dinero(x)} a ${n} meses desde tu pago del ${C.fmt(p.limite)}`);
 }
 
 function accionPago(accion) {
@@ -643,13 +677,6 @@ function accionPago(accion) {
     const x = numero($("#p-gasto").value);
     if (!(x > 0)) return fallo("Escribe cuánto gastaste de más.");
     sumarA(c, clave, x); msg = `Se sumaron ${C.dinero(x)}`;
-  } else if (accion === "pago-ameses") {
-    const x = redondear(numero($("#m-monto").value)), n = parseInt($("#m-meses").value, 10);
-    if (!(x > 0)) return fallo("Escribe el monto de la compra.");
-    if (x > p.base + 0.005) return fallo(`No puede ser más de ${C.dinero(p.base)}, lo que trae este pago sin contar otras compras.`);
-    c.montos = { ...(c.montos || {}), [clave]: redondear(p.base - x) };
-    c.compras = [...(c.compras || []), { id: nuevoId(), fecha: C.iso(p.corte), descripcion: $("#m-desc").value.trim().slice(0, 60) || "Pasada a meses", monto: x, meses: n, de_estado: clave }];
-    msg = `Listo: ${C.dinero(x)} a ${n} meses`;
   } else if (accion === "pago-deshacer") { deshacerPago(c, clave); msg = "Listo, lo regresé como estaba"; }
   cerrar();
   guardar(msg);
@@ -776,6 +803,7 @@ document.addEventListener("click", async e => {
     const i = dlg.querySelector(`[data-panel="${b.dataset.op}"] input`); if (i) i.focus();
     return;
   }
+  if (b.dataset.accion === "aplicar-ameses") { aplicarAMeses(); return; }
   if (b.dataset.accion && b.dataset.accion.startsWith("pago-")) { accionPago(b.dataset.accion); return; }
   if (b.dataset.editar) { formCuenta(S.cuentas.find(x => x.id === b.dataset.editar)); return; }
   switch (b.dataset.accion) {
