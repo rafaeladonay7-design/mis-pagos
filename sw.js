@@ -1,5 +1,5 @@
 // Primero la red (para tener siempre la versión nueva) y, sin internet, lo guardado.
-const CACHE = "mis-pagos-v16";
+const CACHE = "mis-pagos-v17";
 const ARCHIVOS = ["./", "index.html", "styles.css", "calc.js", "app.js", "firebase-config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

@@ -204,7 +204,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .resumen .tile { grid-row: span 3; grid-template-rows: subgrid; row-gap: 4px; }
 /* en formularios de dos columnas, los campos alineados aunque una etiqueta ocupe dos líneas */
 .dos > .campo { grid-row: span 3; display: grid; grid-template-rows: subgrid; row-gap: 5px; }
-.dos { row-gap: 0; }
+.dos { row-gap: 14px; }
 /* fecha: mes arriba y día de la semana abajo */
 .fecha .m { display: block; }
 .fecha .w { font-size: 10px; opacity: 0.8; }

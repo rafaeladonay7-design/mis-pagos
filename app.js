@@ -365,7 +365,7 @@ function formCompra(c, compra) {
     <label class="campo" for="k-desc">¿Qué compraste? (opcional)<input id="k-desc" autocomplete="off" placeholder="Ej. Liverpool, Amazon, súper" value="${esc(compra.descripcion)}"></label>
     <div class="dos">
       <label class="campo" for="k-monto">Monto total<input id="k-monto" inputmode="decimal" placeholder="0.00" value="${esc(compra.monto)}"><small>Lo que costó en total.</small></label>
-      <label class="campo" for="k-fecha">Fecha de la compra<input type="date" id="k-fecha" value="${esc(compra.fecha)}"><small>Define en qué corte entra.</small></label>
+      <label class="campo" for="k-fecha">Fecha de la compra<input type="date" id="k-fecha" value="${esc(compra.fecha)}" ${compra.de_estado ? "disabled" : ""}><small>${compra.de_estado ? `Venía en tu pago que vence el ${C.fmt(C.parse(compra.de_estado))}.` : "Define en qué corte entra."}</small></label>
     </div>
     <div class="campo"><span>¿Cómo la pagas?</span>
       <div class="seg" role="radiogroup">
@@ -410,7 +410,14 @@ function guardarCompra(form) {
   if (!(monto > 0)) return fallo("Escribe cuánto costó, por ejemplo 1200.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return fallo("Elige la fecha de la compra.");
   const meses = dlg.querySelector("input[name=k-forma]:checked").value === "meses" ? parseInt($("#k-meses").value, 10) : 1;
-  const compra = { id: form.dataset.id || nuevoId(), fecha: f, descripcion: $("#k-desc").value.trim().slice(0, 60), monto: redondear(monto), meses };
+  const previa = (c.compras || []).find(x => x.id === form.dataset.id);
+  const compra = { id: form.dataset.id || nuevoId(), fecha: previa && previa.de_estado ? previa.fecha : f, descripcion: $("#k-desc").value.trim().slice(0, 60), monto: redondear(monto), meses };
+  if (previa && previa.de_estado) {
+    // si cambia el monto, el pago de donde salió se ajusta por la diferencia
+    compra.de_estado = previa.de_estado;
+    const base = pagoDe(c, previa.de_estado);
+    if (base) c.montos = { ...(c.montos || {}), [previa.de_estado]: redondear(Math.max(0, base.base + previa.monto - compra.monto)) };
+  }
   c.compras = [...(c.compras || []).filter(x => x.id !== compra.id), compra];
   cerrar();
   const primera = C.limiteDeCorte(c, C.cuotasDeCompra(c, compra)[0].corte);
@@ -575,6 +582,18 @@ function formPago(k) {
         <label class="campo" for="p-monto">Cambiar el monto de este pago<input id="p-monto" inputmode="decimal" value="${esc(p.monto)}"></label>
         <button type="button" class="btn ghost" data-accion="pago-monto">Guardar</button>
       </div>
+      ${c.tipo === "tarjeta" && p.base > 0 ? `<button type="button" class="btn ghost block" data-op="ameses">Pasar a meses una compra de este pago</button>
+      <div class="caja" data-panel="ameses" hidden>
+        <p class="hint">Para una compra que ya viene dentro de este pago (${C.dinero(p.base)}). Se resta de este pago y se divide en mensualidades desde este mismo pago.</p>
+        <label class="campo" for="m-desc">¿Qué compra es? (opcional)<input id="m-desc" autocomplete="off" placeholder="Ej. Liverpool"></label>
+        <div class="dos">
+          <label class="campo" for="m-monto">Monto de la compra<input id="m-monto" inputmode="decimal" placeholder="0.00"><small>Máximo ${C.dinero(p.base)}.</small></label>
+          <label class="campo" for="m-meses">¿A cuántos meses?<select id="m-meses">${[3, 6, 9, 12, 18, 24].map(n => `<option value="${n}">${n} meses</option>`).join("")}</select><small>Los que te dé tu banco.</small></label>
+        </div>
+        <p class="hint" id="m-vista">Pon el monto para ver cómo queda.</p>
+        <p class="hint">Si tu banco cobra intereses por pasarla a meses, pon el total con intereses que te indique.</p>
+        <button type="button" class="btn" data-accion="pago-ameses">Pasar a meses</button>
+      </div>` : ""}
       ${c.tipo === "tarjeta" ? `<button type="button" class="btn ghost block" data-compra-nueva="${esc(c.id)}">+ Agregar una compra con esta tarjeta</button>
         <p class="hint">Pones la fecha y si es a meses, y se suma sola al estado de cuenta que le toca.</p>` : `
       <div class="linea">
@@ -585,6 +604,16 @@ function formPago(k) {
       <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cerrar</button></div>`;
   }
   abrir(`<form class="form" id="f-pago" data-k="${esc(k)}" novalidate>${titulo}${cuerpo}</form>`);
+  const mm = $("#m-monto");
+  if (mm) {
+    const vista = () => {
+      const x = numero(mm.value), n = parseInt($("#m-meses").value, 10);
+      $("#m-vista").textContent = x > 0 && x <= p.base
+        ? `Este pago queda en ${C.dinero(p.monto - x + Math.floor((x / n) * 100) / 100)} y pagarás ${C.dinero(Math.floor((x / n) * 100) / 100)} al mes por ${n} meses.`
+        : x > p.base ? `No puede ser más de ${C.dinero(p.base)}.` : "Pon el monto para ver cómo queda.";
+    };
+    mm.addEventListener("input", vista); $("#m-meses").addEventListener("change", vista);
+  }
 }
 
 function accionPago(accion) {
@@ -614,6 +643,13 @@ function accionPago(accion) {
     const x = numero($("#p-gasto").value);
     if (!(x > 0)) return fallo("Escribe cuánto gastaste de más.");
     sumarA(c, clave, x); msg = `Se sumaron ${C.dinero(x)}`;
+  } else if (accion === "pago-ameses") {
+    const x = redondear(numero($("#m-monto").value)), n = parseInt($("#m-meses").value, 10);
+    if (!(x > 0)) return fallo("Escribe el monto de la compra.");
+    if (x > p.base + 0.005) return fallo(`No puede ser más de ${C.dinero(p.base)}, lo que trae este pago sin contar otras compras.`);
+    c.montos = { ...(c.montos || {}), [clave]: redondear(p.base - x) };
+    c.compras = [...(c.compras || []), { id: nuevoId(), fecha: C.iso(p.corte), descripcion: $("#m-desc").value.trim().slice(0, 60) || "Pasada a meses", monto: x, meses: n, de_estado: clave }];
+    msg = `Listo: ${C.dinero(x)} a ${n} meses`;
   } else if (accion === "pago-deshacer") { deshacerPago(c, clave); msg = "Listo, lo regresé como estaba"; }
   cerrar();
   guardar(msg);
@@ -676,7 +712,9 @@ function normalizar(d) {
         let cid = String(x.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40);
         while (!cid || ids.has(cid)) cid = nuevoId();
         ids.add(cid);
-        return { id: cid, fecha: x.fecha, descripcion: String(x.descripcion ?? "").trim().slice(0, 60), monto: num(x.monto, 0, 1e9, 0), meses: ent(x.meses, 1, 48, 1) };
+        const o2 = { id: cid, fecha: x.fecha, descripcion: String(x.descripcion ?? "").trim().slice(0, 60), monto: num(x.monto, 0, 1e9, 0), meses: ent(x.meses, 1, 48, 1) };
+        if (fecha(x.de_estado)) o2.de_estado = x.de_estado;  // compra que ya venía en ese estado de cuenta y se pasó a meses
+        return o2;
       });
     }
     if (REGLAS.includes(c.regla_pago)) o.regla_pago = c.regla_pago;
@@ -755,7 +793,12 @@ document.addEventListener("click", async e => {
     }
     case "borrar-compra": {
       const f = $("#f-compra"), c = S.cuentas.find(x => x.id === f.dataset.cuenta);
-      if (b.dataset.seguro) { c.compras = (c.compras || []).filter(x => x.id !== f.dataset.id); cerrar(); guardar("Compra eliminada"); }
+      if (b.dataset.seguro) {
+        const k = (c.compras || []).find(x => x.id === f.dataset.id);
+        if (k && k.de_estado) { const base = pagoDe(c, k.de_estado); if (base) c.montos = { ...(c.montos || {}), [k.de_estado]: redondear(base.base + k.monto) }; }
+        c.compras = (c.compras || []).filter(x => x.id !== f.dataset.id); cerrar();
+        guardar(k && k.de_estado ? "Listo: la compra regresó completa a su pago" : "Compra eliminada");
+      }
       else { b.dataset.seguro = "1"; b.textContent = "Toca otra vez para eliminar"; }
       break;
     }
