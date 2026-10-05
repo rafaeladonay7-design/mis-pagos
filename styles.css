@@ -243,3 +243,6 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .compra .det { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); }
 .desglose { gap: 6px; font-size: 14px; }
 .desglose .linea-cuenta.total { font-size: 15px; }
+
+/* pantalla fija: sin zoom por doble toque */
+html, body { touch-action: pan-x pan-y; }

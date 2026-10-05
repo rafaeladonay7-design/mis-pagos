@@ -1006,6 +1006,9 @@ window.addEventListener("storage", e => {
   }
 });
 
+// pantalla fija: en iPhone, Safari ignora user-scalable=no; esto bloquea el zoom con dos dedos
+["gesturestart", "gesturechange"].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+
 render();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
