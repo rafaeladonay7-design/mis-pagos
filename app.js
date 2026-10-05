@@ -351,11 +351,99 @@ function listaCompras(c) {
   }).filter(f => f.ultima >= C.add(hoy, -30)).sort((a, b) => (a.x.fecha < b.x.fecha ? 1 : -1));
   if (!filas.length) return "";
   return `<ul class="compras">${filas.map(({ x, cuotas, pendientes }) => `<li><button class="compra" data-compra="${esc(c.id)}|${esc(x.id)}">
-    <span class="nom">${esc(x.descripcion || "Compra")}</span><span class="num">${C.dinero(x.monto)}</span>
+    <span class="nom">${esc(x.descripcion || (x.existente ? "Mensualidades" : "Compra"))}</span><span class="num">${x.existente ? `${C.dinero(cuotas[0].cuota)}/mes` : C.dinero(x.monto)}</span>
     <span class="det">${C.fmt(C.parse(x.fecha))} · ${x.meses > 1 ? `${x.meses} meses de ${C.dinero(cuotas[0].cuota)} · ${pendientes ? `quedan ${pendientes}` : "pagada"}` : "de contado"}</span></button></li>`).join("")}</ul>`;
 }
 
+// "Ya traigo mensualidades": un pago que ya viene en el pago normal (ej. $342) se
+// marca como N mensualidades, para que la app sepa cuándo se termina.
+function formMensualidad(c) {
+  const hoy = C.hoyLocal();
+  const ciclos = C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, 400)).filter(p => !p.pagado && !p.pospuesto).slice(0, 12);
+  const normal = Number(c.pago_estimado) || 0;
+  const def = ciclos.find(p => !p.cubierto && Math.abs(p.base - normal) < 0.005) || ciclos[0];
+  if (!ciclos.length) return toast("No encontré pagos próximos de esta tarjeta.");
+  abrir(`<form class="form" id="f-mensualidad" data-cuenta="${esc(c.id)}" novalidate>
+    <div class="stack" style="gap:2px"><span class="tipo">${esc(c.nombre)}</span><h2>Mensualidades que ya traes</h2></div>
+    <p class="hint">Para algo que ya pagas a meses, como una compra a meses sin intereses. Así la app sabe cuándo se termina.</p>
+    <label class="campo" for="n-desc">¿Qué es? (opcional)<input id="n-desc" autocomplete="off" placeholder="Ej. Celular, Liverpool"></label>
+    <div class="dos">
+      <label class="campo" for="n-cuota">Mensualidad<input id="n-cuota" inputmode="decimal" value="${normal || ""}" placeholder="0.00"><small>Lo que pagas cada mes.</small></label>
+      <label class="campo" for="n-faltan">¿Cuántas te faltan?<input id="n-faltan" inputmode="numeric" placeholder="Ej. 6"><small>Contando la primera de abajo.</small></label>
+    </div>
+    <label class="campo" for="n-desde">¿En qué pago va la primera que falta?<select id="n-desde">${ciclos.map(p => `<option value="${esc(p.clave)}" ${p === def ? "selected" : ""}>${C.fmt(p.limite)} · ${C.dinero(p.monto)}</option>`).join("")}</select></label>
+    <label class="check"><input type="checkbox" id="n-incluida" checked> Ya está dentro de mi pago de cada mes (${C.dinero(normal)})</label>
+    <div class="caja" id="n-vista" aria-live="polite"></div>
+    <p class="error" id="n-error" hidden></p>
+    <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button></div>
+  </form>`);
+  const vista = () => {
+    const cuota = numero($("#n-cuota").value), n = parseInt($("#n-faltan").value, 10), desde = ciclos.find(p => p.clave === $("#n-desde").value);
+    const caja = $("#n-vista");
+    if (!(cuota > 0) || !(n >= 1 && n <= 48) || !desde) { caja.innerHTML = `<p class="hint">Pon la mensualidad y cuántas te faltan para ver cuándo terminas.</p>`; return; }
+    const cuotas = C.cuotasDeCompra(c, { fecha: C.iso(desde.corte), monto: cuota * n, meses: n });
+    const ultima = C.limiteDeCorte(c, cuotas[cuotas.length - 1].corte);
+    const incl = $("#n-incluida").checked;
+    caja.innerHTML = `<p>${n === 1 ? "Tu última mensualidad" : `Pagas ${C.dinero(cuota)} en ${n} pagos; la última`} vence el <b>${C.fmt(ultima)} ${C.Y(ultima)}</b>.</p>
+      <p class="hint">${incl ? `Tu pago de cada mes baja de ${C.dinero(normal)} a ${C.dinero(Math.max(0, normal - cuota))} y estas mensualidades se suman aparte hasta que terminen.` : "Se suman encima de tu pago de cada mes."}</p>`;
+  };
+  ["n-cuota", "n-faltan", "n-desde", "n-incluida"].forEach(id => { const e = $("#" + id); e.addEventListener("input", vista); e.addEventListener("change", vista); });
+  vista();
+}
+
+function guardarMensualidad(form) {
+  const err = $("#n-error"), fallo = t => { err.textContent = t; err.hidden = false; };
+  const c = S.cuentas.find(x => x.id === form.dataset.cuenta);
+  if (!c) return cerrar();
+  const cuota = redondear(numero($("#n-cuota").value)), n = parseInt($("#n-faltan").value, 10);
+  if (!(cuota > 0)) return fallo("Escribe cuánto pagas cada mes.");
+  if (!(n >= 1 && n <= 48)) return fallo("Escribe cuántas mensualidades te faltan (de 1 a 48).");
+  const hoy = C.hoyLocal();
+  const ciclos = C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, 1600));
+  const desde = ciclos.find(p => p.clave === $("#n-desde").value);
+  if (!desde) return fallo("Elige en qué pago va la primera.");
+  const compra = { id: nuevoId(), fecha: C.iso(desde.corte), descripcion: $("#n-desc").value.trim().slice(0, 60) || "Mensualidades", monto: redondear(cuota * n), meses: n };
+  if ($("#n-incluida").checked) {
+    // se saca del pago normal para no contarlo dos veces, y se guarda cómo regresarlo
+    const normal = Number(c.pago_estimado) || 0, restado = redondear(Math.min(normal, cuota));
+    const claves = new Set(C.cuotasDeCompra(c, compra).map(q => C.iso(C.limiteDeCorte(c, q.corte))));
+    const ex = { estimado: restado, montos: {}, fijados: [] };
+    c.montos = { ...(c.montos || {}) };
+    // los pagos estimados de antes de la primera mensualidad conservan su monto actual
+    for (const p of ciclos) if (p.limite < desde.limite && !p.pagado && p.estimado) { c.montos[p.clave] = p.base; ex.fijados.push(p.clave); }
+    for (const k of claves) if (k in c.montos) { const r = redondear(Math.min(Number(c.montos[k]), cuota)); c.montos[k] = redondear(Number(c.montos[k]) - r); ex.montos[k] = r; }
+    c.pago_estimado = redondear(normal - restado);
+    compra.existente = ex;
+  }
+  c.compras = [...(c.compras || []), compra];
+  cerrar();
+  const ultima = C.limiteDeCorte(c, C.cuotasDeCompra(c, compra)[n - 1].corte);
+  guardar(`Listo: ${n} ${n === 1 ? "mensualidad" : "mensualidades"} de ${C.dinero(cuota)}, la última el ${C.fmt(ultima)}`);
+}
+
+function quitarMensualidad(c, k) {
+  const ex = k.existente;
+  if (ex) {
+    c.pago_estimado = redondear((Number(c.pago_estimado) || 0) + ex.estimado);
+    c.montos = { ...(c.montos || {}) };
+    for (const [clave, r] of Object.entries(ex.montos)) c.montos[clave] = redondear((Number(c.montos[clave]) || 0) + r);
+    for (const clave of ex.fijados) delete c.montos[clave];
+  }
+  c.compras = (c.compras || []).filter(x => x.id !== k.id);
+}
+
 function formCompra(c, compra) {
+  if (compra && compra.existente) {
+    const cuotas = C.cuotasDeCompra(c, compra), lim = q => C.limiteDeCorte(c, q.corte);
+    abrir(`<form class="form" id="f-compra" data-cuenta="${esc(c.id)}" data-id="${esc(compra.id)}" novalidate>
+      <div class="stack" style="gap:2px"><span class="tipo">${esc(c.nombre)}</span><h2>${esc(compra.descripcion || "Mensualidades")}</h2></div>
+      <div class="caja"><p><b class="num">${C.dinero(cuotas[0].cuota)}</b> al mes, ${compra.meses} ${compra.meses === 1 ? "mensualidad" : "mensualidades"}.</p>
+        <p class="hint">De tu pago del ${C.fmt(lim(cuotas[0]))} al del ${C.fmt(lim(cuotas[cuotas.length - 1]))} ${C.Y(lim(cuotas[cuotas.length - 1]))}.</p></div>
+      <p class="hint">Para cambiarlas, elimínalas y vuelve a agregarlas. Al eliminarlas, tu pago de cada mes regresa a como estaba.</p>
+      <div class="acciones"><button type="button" class="btn danger" data-accion="borrar-compra">Eliminar</button><button type="button" class="btn" data-accion="cerrar">Cerrar</button></div>
+    </form>`);
+    return;
+  }
   const nueva = !compra;
   compra = compra || { fecha: C.iso(C.hoyLocal()), meses: 1, monto: "", descripcion: "" };
   const opcionesMeses = [3, 6, 9, 12, 18, 24];
@@ -458,7 +546,10 @@ function formCuenta(c, tipo) {
         <small>Solo si este mes es distinto. Sin contar las compras que registras aparte.</small></label>
     </div>
     <label class="campo" for="c-deuda">¿Cuánto debes en total? (opcional)<input id="c-deuda" inputmode="decimal" placeholder="0.00" value="${esc(c.deuda_total ?? "")}"></label>
-    ${esTarjeta && !nueva && ciclos.length ? `<hr class="sep">${htmlAMeses(c, ciclos)}` : ""}
+    ${esTarjeta && !nueva ? `<hr class="sep"><div class="stack"><h3>Compras y meses</h3>
+      <button type="button" class="btn ghost block" data-compra-nueva="${esc(c.id)}">+ Agregar una compra nueva</button>
+      <button type="button" class="btn ghost block" data-mensualidad="${esc(c.id)}">Ya traigo mensualidades (ej. ${C.dinero(Number(c.pago_estimado) || 0)} por X meses)</button>
+      ${ciclos.length ? htmlAMeses(c, ciclos) : ""}</div>` : ""}
     <p class="error" id="c-error" hidden></p>
     <div class="acciones">
       ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-cuenta">Eliminar</button>`}
@@ -741,6 +832,9 @@ function normalizar(d) {
         ids.add(cid);
         const o2 = { id: cid, fecha: x.fecha, descripcion: String(x.descripcion ?? "").trim().slice(0, 60), monto: num(x.monto, 0, 1e9, 0), meses: ent(x.meses, 1, 48, 1) };
         if (fecha(x.de_estado)) o2.de_estado = x.de_estado;  // compra que ya venía en ese estado de cuenta y se pasó a meses
+        if (x.existente && typeof x.existente === "object") {  // mensualidades que ya venían dentro del pago normal
+          o2.existente = { estimado: num(x.existente.estimado, 0, 1e9, 0), montos: montos(x.existente.montos), fijados: fechas(x.existente.fijados) };
+        }
         return o2;
       });
     }
@@ -791,6 +885,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.pagar) { const { c, clave } = buscarPago(b.dataset.pagar); c.pagados = [...new Set([...(c.pagados || []), clave])]; guardar(`${c.nombre}: pagado`); return; }
   if (b.dataset.abrir) { formPago(b.dataset.abrir); return; }
   if (b.dataset.compraNueva) { const c = S.cuentas.find(x => x.id === b.dataset.compraNueva); if (c) formCompra(c); return; }
+  if (b.dataset.mensualidad) { const c = S.cuentas.find(x => x.id === b.dataset.mensualidad); if (c) formMensualidad(c); return; }
   if (b.dataset.compra) {
     const [cid, kid] = b.dataset.compra.split("|"), c = S.cuentas.find(x => x.id === cid);
     const k = c && (c.compras || []).find(x => x.id === kid);
@@ -823,6 +918,7 @@ document.addEventListener("click", async e => {
       const f = $("#f-compra"), c = S.cuentas.find(x => x.id === f.dataset.cuenta);
       if (b.dataset.seguro) {
         const k = (c.compras || []).find(x => x.id === f.dataset.id);
+        if (k && k.existente) { quitarMensualidad(c, k); cerrar(); guardar("Listo: tu pago de cada mes regresó a como estaba"); break; }
         if (k && k.de_estado) { const base = pagoDe(c, k.de_estado); if (base) c.montos = { ...(c.montos || {}), [k.de_estado]: redondear(base.base + k.monto) }; }
         c.compras = (c.compras || []).filter(x => x.id !== f.dataset.id); cerrar();
         guardar(k && k.de_estado ? "Listo: la compra regresó completa a su pago" : "Compra eliminada");
@@ -873,6 +969,7 @@ document.addEventListener("submit", e => {
   }
   else if (f.id === "f-ingreso") guardarIngreso();
   else if (f.id === "f-compra") guardarCompra(f);
+  else if (f.id === "f-mensualidad") guardarMensualidad(f);
   else if (f.id === "f-cuenta") guardarCuenta(f);
   else if (f.id === "f-importar") {
     try { S = leerRespaldo($("#r-texto").value); cerrar(); tab = "inicio"; guardar("Respaldo cargado"); }
