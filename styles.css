@@ -211,6 +211,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* botones del formulario: Cancelar y Guardar juntos; Eliminar abajo a lo ancho */
 .form .acciones .btn { flex: 1 1 0; }
 .form .acciones [data-accion="borrar-cuenta"], .form .acciones [data-accion="borrar-compra"] { order: 3; flex-basis: 100%; }
+.form .acciones [data-accion="restaurar-compra"] { order: 4; flex-basis: 100%; }
 
 /* cuenta hasta el último pago */
 .vuelta { gap: 8px; }

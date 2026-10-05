@@ -484,8 +484,11 @@ function formCompra(c, compra) {
       <div class="stack" style="gap:2px"><span class="tipo">${esc(c.nombre)}</span><h2>${esc(compra.descripcion || "Mensualidades")}</h2></div>
       <div class="caja"><p><b class="num">${C.dinero(cuotas[0].cuota)}</b> al mes, ${compra.meses} ${compra.meses === 1 ? "mensualidad" : "mensualidades"}.</p>
         <p class="hint">De tu pago del ${C.fmt(lim(cuotas[0]))} al del ${C.fmt(lim(cuotas[cuotas.length - 1]))} ${C.Y(lim(cuotas[cuotas.length - 1]))}.</p></div>
-      <p class="hint">Para cambiarlas, elimínalas y vuelve a agregarlas. Al eliminarlas, tu pago de cada mes regresa a como estaba.</p>
-      <div class="acciones"><button type="button" class="btn danger" data-accion="borrar-compra">Eliminar</button><button type="button" class="btn" data-accion="cerrar">Cerrar</button></div>
+      <p class="hint"><b>Eliminar:</b> estas mensualidades dejan de sumarse a todos tus pagos.${compra.existente.estimado > 0 || Object.keys(compra.existente.montos).length ? `<br><b>Regresar como estaba:</b> si te equivocaste al agregarlas; tu pago de cada mes vuelve a incluirlas.` : ""}</p>
+      <div class="acciones">
+        ${compra.existente.estimado > 0 || Object.keys(compra.existente.montos).length ? `<button type="button" class="btn ghost" data-accion="restaurar-compra">Regresar como estaba</button>` : ""}
+        <button type="button" class="btn" data-accion="cerrar">Cerrar</button>
+        <button type="button" class="btn danger" data-accion="borrar-compra">Eliminar</button></div>
     </form>`);
     return;
   }
@@ -511,9 +514,11 @@ function formCompra(c, compra) {
     <div class="caja" id="k-vista" aria-live="polite"></div>
     <p class="error" id="k-error" hidden></p>
     <div class="acciones">
+      ${!nueva && compra.de_estado ? `<button type="button" class="btn ghost" data-accion="restaurar-compra">Regresar al pago de donde salió</button>` : ""}
       ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-compra">Eliminar</button>`}
       <button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button>
     </div>
+    ${nueva ? "" : `<p class="hint">Eliminar: la compra deja de sumarse a todos tus pagos.${compra.de_estado ? " Regresar: si te equivocaste al pasarla a meses, vuelve completa al pago de donde salió." : ""}</p>`}
   </form>`);
   const vista = () => {
     const forma = dlg.querySelector("input[name=k-forma]:checked").value;
@@ -959,14 +964,23 @@ document.addEventListener("click", async e => {
       if (d) { S = d; tab = "inicio"; guardar(usuario ? "Tus datos se guardaron en tu cuenta" : "Datos cargados"); }
       break;
     }
+    case "restaurar-compra": {
+      const f = $("#f-compra"), c = S.cuentas.find(x => x.id === f.dataset.cuenta);
+      const k = c && (c.compras || []).find(x => x.id === f.dataset.id);
+      if (!k) { cerrar(); break; }
+      if (k.existente) { quitarMensualidad(c, k); cerrar(); guardar("Listo: tu pago de cada mes regresó a como estaba"); break; }
+      if (k.de_estado) { const base = pagoDe(c, k.de_estado); if (base) c.montos = { ...(c.montos || {}), [k.de_estado]: redondear(base.base + k.monto) }; }
+      c.compras = (c.compras || []).filter(x => x.id !== k.id); cerrar();
+      guardar("Listo: la compra regresó completa al pago de donde salió");
+      break;
+    }
     case "borrar-compra": {
       const f = $("#f-compra"), c = S.cuentas.find(x => x.id === f.dataset.cuenta);
       if (b.dataset.seguro) {
         const k = (c.compras || []).find(x => x.id === f.dataset.id);
-        if (k && k.existente) { quitarMensualidad(c, k); cerrar(); guardar("Listo: tu pago de cada mes regresó a como estaba"); break; }
-        if (k && k.de_estado) { const base = pagoDe(c, k.de_estado); if (base) c.montos = { ...(c.montos || {}), [k.de_estado]: redondear(base.base + k.monto) }; }
+        // eliminar = la compra deja de sumarse a todos los pagos (no regresa a ningún lado)
         c.compras = (c.compras || []).filter(x => x.id !== f.dataset.id); cerrar();
-        guardar(k && k.de_estado ? "Listo: la compra regresó completa a su pago" : "Compra eliminada");
+        guardar(k && k.meses > 1 ? "Eliminada: ya no se suma a tus próximos pagos" : "Compra eliminada");
       }
       else { b.dataset.seguro = "1"; b.textContent = "Toca otra vez para eliminar"; }
       break;
