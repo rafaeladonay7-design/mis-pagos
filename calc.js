@@ -267,7 +267,7 @@
       "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT15H", "DESCRIPTION:Mañana", "END:VALARM",
       "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:PT9H", "DESCRIPTION:Hoy", "END:VALARM", "END:VEVENT");
     for (const p of P.pagos) {
-      if (p.pagado || p.pospuesto) continue;
+      if (p.pagado || p.pospuesto || !(p.monto > 0.005)) continue;  // sin pagos de $0 en el calendario
       const desc = [`Fecha límite: ${fmt(p.limite)} ${Y(p.limite)}`];
       if (p.corte) desc.push(`Corte: ${fmt(p.corte)}`);
       if (p.estimado) desc.push("Monto estimado: revisa tu estado de cuenta.");

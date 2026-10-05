@@ -126,7 +126,7 @@ function inicio() {
   if (!hecho()) return h;
 
   const P = C.plan(S, hoy);
-  const proximo = P.pagos.find(p => !p.pagado && !p.pospuesto && p.pago >= hoy);
+  const proximo = P.pagos.find(p => !p.pagado && !p.pospuesto && p.monto > 0.005 && p.pago >= hoy);
   const proxCobro = P.cobros[0];
   const mesRef = proxCobro ? proxCobro.fecha : hoy;
   const libreMes = P.cobros.filter(c => C.M(c.fecha) === C.M(mesRef) && C.Y(c.fecha) === C.Y(mesRef)).reduce((s, c) => s + c.libre, 0);
@@ -158,7 +158,7 @@ function inicio() {
 
   h += `<section class="sec"><div class="sec-head"><h2>Próximos pagos</h2><span class="hint">Toca un pago para cambiarlo</span></div><ul class="lista card">`;
   let mes = -1;
-  for (const p of P.pagos.filter(p => !((p.pagado || p.pospuesto) && p.pago < C.add(hoy, -7)))) {
+  for (const p of P.pagos.filter(p => p.monto > 0.005 && !((p.pagado || p.pospuesto) && p.pago < C.add(hoy, -7)))) {
     if (C.M(p.pago) !== mes) { mes = C.M(p.pago); h += `<li class="mes-sep">${C.MESES_LARGO[mes - 1]}</li>`; }
     h += filaPago(p, hoy);
   }
