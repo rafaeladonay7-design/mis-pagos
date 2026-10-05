@@ -181,6 +181,7 @@ function filaPago(p, hoy) {
   partes.push(`límite ${C.fmt(p.limite)}`);
   if (+p.pago !== +p.limite && !p.urgente) partes.push(p.pago > p.limite ? "se recorre por día inhábil" : "se paga antes");
   if (p.estimado) partes.push("monto estimado");
+  if (p.compras && p.compras.length) partes.push(`incluye ${p.compras.length} ${p.compras.length === 1 ? "compra" : "compras"}`);
   const arrastre = arrastreHacia(p.cuenta, p.clave);
   if (arrastre) partes.push(`incluye ${C.dinero(arrastre)} del mes anterior`);
   const k = `${p.cuenta.id}|${p.clave}`;
@@ -252,7 +253,8 @@ function cuentas() {
       if (Number(c.deuda_total) > 0) extra.push(`debes ${C.dinero(Number(c.deuda_total))}`);
       h += `<div class="cuenta"><div><span class="tipo">${c.tipo === "tarjeta" ? "Tarjeta" : "Pago fijo"}</span><div class="nom">${esc(c.nombre)}</div>
         <div class="det">${esc(textoCuenta(c))}</div><div class="det num">${extra.join(" · ")}</div></div>
-        <button class="btn ghost sm" data-editar="${esc(c.id)}">Editar</button></div>`;
+        <div class="der"><button class="btn ghost sm" data-editar="${esc(c.id)}">Editar</button>${c.tipo === "tarjeta" ? `<button class="btn sm" data-compra-nueva="${esc(c.id)}">+ Compra</button>` : ""}</div>
+        ${c.tipo === "tarjeta" ? listaCompras(c) : ""}</div>`;
     }
     h += `</div>`;
   } else h += `<div class="card vacio"><p>Todavía no tienes cuentas.</p></div>`;
@@ -338,6 +340,83 @@ function guardarIngreso() {
   guardar("Ingreso guardado");
 }
 
+// Compras de una tarjeta que todavía tienen mensualidades por pagar (o de hace poco)
+function listaCompras(c) {
+  const hoy = C.hoyLocal();
+  const filas = (c.compras || []).map(x => {
+    const cuotas = C.cuotasDeCompra(c, x);
+    const ultima = C.limiteDeCorte(c, cuotas[cuotas.length - 1].corte);
+    const pendientes = cuotas.filter(q => C.limiteDeCorte(c, q.corte) >= hoy).length;
+    return { x, cuotas, ultima, pendientes };
+  }).filter(f => f.ultima >= C.add(hoy, -30)).sort((a, b) => (a.x.fecha < b.x.fecha ? 1 : -1));
+  if (!filas.length) return "";
+  return `<ul class="compras">${filas.map(({ x, cuotas, pendientes }) => `<li><button class="compra" data-compra="${esc(c.id)}|${esc(x.id)}">
+    <span class="nom">${esc(x.descripcion || "Compra")}</span><span class="num">${C.dinero(x.monto)}</span>
+    <span class="det">${C.fmt(C.parse(x.fecha))} · ${x.meses > 1 ? `${x.meses} meses de ${C.dinero(cuotas[0].cuota)} · ${pendientes ? `quedan ${pendientes}` : "pagada"}` : "de contado"}</span></button></li>`).join("")}</ul>`;
+}
+
+function formCompra(c, compra) {
+  const nueva = !compra;
+  compra = compra || { fecha: C.iso(C.hoyLocal()), meses: 1, monto: "", descripcion: "" };
+  const opcionesMeses = [3, 6, 9, 12, 18, 24];
+  const aMeses = compra.meses > 1;
+  abrir(`<form class="form" id="f-compra" data-cuenta="${esc(c.id)}" data-id="${esc(compra.id || "")}" novalidate>
+    <div class="stack" style="gap:2px"><span class="tipo">${esc(c.nombre)}</span><h2>${nueva ? "Nueva compra" : "Editar compra"}</h2></div>
+    <label class="campo" for="k-desc">¿Qué compraste? (opcional)<input id="k-desc" autocomplete="off" placeholder="Ej. Liverpool, Amazon, súper" value="${esc(compra.descripcion)}"></label>
+    <div class="dos">
+      <label class="campo" for="k-monto">Monto total<input id="k-monto" inputmode="decimal" placeholder="0.00" value="${esc(compra.monto)}"><small>Lo que costó en total.</small></label>
+      <label class="campo" for="k-fecha">Fecha de la compra<input type="date" id="k-fecha" value="${esc(compra.fecha)}"><small>Define en qué corte entra.</small></label>
+    </div>
+    <div class="campo"><span>¿Cómo la pagas?</span>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="k-forma" value="contado" ${aMeses ? "" : "checked"}>De contado</label>
+        <label><input type="radio" name="k-forma" value="meses" ${aMeses ? "checked" : ""}>A meses</label>
+      </div></div>
+    <label class="campo" for="k-meses" data-forma="meses">¿A cuántos meses?
+      <select id="k-meses">${opcionesMeses.map(n => `<option value="${n}" ${compra.meses === n ? "selected" : ""}>${n} meses</option>`).join("")}
+        ${aMeses && !opcionesMeses.includes(compra.meses) ? `<option value="${compra.meses}" selected>${compra.meses} meses</option>` : ""}</select></label>
+    <div class="caja" id="k-vista" aria-live="polite"></div>
+    <p class="error" id="k-error" hidden></p>
+    <div class="acciones">
+      ${nueva ? "" : `<button type="button" class="btn danger" data-accion="borrar-compra">Eliminar</button>`}
+      <button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button>
+    </div>
+  </form>`);
+  const vista = () => {
+    const forma = dlg.querySelector("input[name=k-forma]:checked").value;
+    dlg.querySelectorAll("[data-forma]").forEach(e => e.hidden = e.dataset.forma !== forma);
+    const monto = numero($("#k-monto").value), f = $("#k-fecha").value;
+    const meses = forma === "meses" ? parseInt($("#k-meses").value, 10) : 1;
+    const caja = $("#k-vista");
+    if (!(monto > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(f)) { caja.innerHTML = `<p class="hint">Pon el monto y la fecha para ver en qué pagos cae.</p>`; return; }
+    const cuotas = C.cuotasDeCompra(c, { fecha: f, monto, meses });
+    const pago = q => C.limiteDeCorte(c, q.corte);
+    caja.innerHTML = meses > 1
+      ? `<p>Pagarás <b class="num">${C.dinero(cuotas[0].cuota)}</b> al mes por ${meses} meses.</p>
+         <p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}. La primera mensualidad vence el ${C.fmt(pago(cuotas[0]))} y la última el ${C.fmt(pago(cuotas[cuotas.length - 1]))}.</p>`
+      : `<p>Se suma completa a tu pago que vence el <b>${C.fmt(pago(cuotas[0]))}</b>.</p><p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}.</p>`;
+  };
+  dlg.querySelectorAll("input[name=k-forma]").forEach(r => r.addEventListener("change", vista));
+  ["k-monto", "k-fecha", "k-meses"].forEach(id => $("#" + id).addEventListener("input", vista));
+  $("#k-meses").addEventListener("change", vista);
+  vista();
+}
+
+function guardarCompra(form) {
+  const err = $("#k-error"), fallo = t => { err.textContent = t; err.hidden = false; };
+  const c = S.cuentas.find(x => x.id === form.dataset.cuenta);
+  if (!c) return cerrar();
+  const monto = numero($("#k-monto").value), f = $("#k-fecha").value;
+  if (!(monto > 0)) return fallo("Escribe cuánto costó, por ejemplo 1200.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return fallo("Elige la fecha de la compra.");
+  const meses = dlg.querySelector("input[name=k-forma]:checked").value === "meses" ? parseInt($("#k-meses").value, 10) : 1;
+  const compra = { id: form.dataset.id || nuevoId(), fecha: f, descripcion: $("#k-desc").value.trim().slice(0, 60), monto: redondear(monto), meses };
+  c.compras = [...(c.compras || []).filter(x => x.id !== compra.id), compra];
+  cerrar();
+  const primera = C.limiteDeCorte(c, C.cuotasDeCompra(c, compra)[0].corte);
+  guardar(meses > 1 ? `Compra a ${meses} meses: la primera vence el ${C.fmt(primera)}` : `Compra sumada a tu pago que vence el ${C.fmt(primera)}`);
+}
+
 function proximoCiclo(c) {
   const hoy = C.hoyLocal();
   return C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, 70)).find(p => !p.pagado && p.pago >= hoy);
@@ -348,7 +427,7 @@ function formCuenta(c, tipo) {
   c = c || { tipo, limite_tipo: "dias", dias_despues_corte: 20 };
   const esTarjeta = c.tipo === "tarjeta";
   const prox = nueva ? null : proximoCiclo(c);
-  const proxMonto = prox ? (prox.estimado ? "" : prox.monto) : "";
+  const proxMonto = prox ? (prox.estimado ? "" : prox.base) : "";
   abrir(`<form class="form" id="f-cuenta" data-id="${esc(c.id || "")}" data-tipo="${esc(c.tipo)}" novalidate>
     <h2>${nueva ? (esTarjeta ? "Nueva tarjeta" : "Nuevo pago fijo") : esc(c.nombre)}</h2>
     <label class="campo" for="c-nombre">Nombre<input id="c-nombre" autocomplete="off" placeholder="${esTarjeta ? "Ej. BBVA Azul" : "Ej. Préstamo, Mercado Pago"}" value="${esc(c.nombre || "")}"></label>
@@ -368,7 +447,7 @@ function formCuenta(c, tipo) {
       <label class="campo" for="c-normal">Pago de cada mes<input id="c-normal" inputmode="decimal" placeholder="0.00" value="${esc(c.pago_estimado ?? "")}">
         <small>${esTarjeta ? "El “pago para no generar intereses” de siempre." : "Lo que pagas normalmente."}</small></label>
       <label class="campo" for="c-prox">Próximo pago${prox ? ` (${C.fmt(prox.pago)})` : ""}<input id="c-prox" inputmode="decimal" placeholder="Igual que cada mes" value="${esc(proxMonto)}">
-        <small>Solo si este mes es distinto.</small></label>
+        <small>Solo si este mes es distinto. Sin contar las compras que registras aparte.</small></label>
     </div>
     <label class="campo" for="c-deuda">¿Cuánto debes en total? (opcional)<input id="c-deuda" inputmode="decimal" placeholder="0.00" value="${esc(c.deuda_total ?? "")}"></label>
     <p class="error" id="c-error" hidden></p>
@@ -432,7 +511,7 @@ function siguienteCiclo(c, clave) {
 }
 function sumarA(c, clave, cantidad) {
   const p = pagoDe(c, clave);
-  c.montos = { ...(c.montos || {}), [clave]: redondear((p ? p.monto : 0) + cantidad) };
+  c.montos = { ...(c.montos || {}), [clave]: redondear((p ? p.base : 0) + cantidad) };
 }
 function moverAlSiguiente(c, clave, cantidad, tipo, pagado) {
   const sig = siguienteCiclo(c, clave);
@@ -461,7 +540,11 @@ function formPago(k) {
   const aj = p.ajuste;
   const titulo = `<div class="stack" style="gap:4px"><span class="tipo">${esc(p.nombre)}</span>
     <h2 class="num" style="font-size:30px">${C.dinero(p.monto)}</h2>
-    <p class="hint">Pagas el ${C.fmt(p.pago)}${p.corte ? ` · corte ${C.fmt(p.corte)}` : ""} · límite ${C.fmt(p.limite)}</p></div>`;
+    <p class="hint">Pagas el ${C.fmt(p.pago)}${p.corte ? ` · corte ${C.fmt(p.corte)}` : ""} · límite ${C.fmt(p.limite)}</p></div>
+    ${p.compras.length ? `<div class="caja desglose num">
+      <div class="linea-cuenta"><span>Pago normal${p.estimado ? " (estimado)" : ""}</span><b>${C.dinero(p.base)}</b></div>
+      ${p.compras.map(x => `<div class="linea-cuenta"><span>${esc(x.compra.descripcion || "Compra")}${x.de > 1 ? ` · ${x.numero} de ${x.de}` : ""}</span><b>${C.dinero(x.cuota)}</b></div>`).join("")}
+      <div class="linea-cuenta total"><span>Total</span><b>${C.dinero(p.monto)}</b></div></div>` : ""}`;
   let cuerpo;
   if (p.pagado || p.pospuesto) {
     let txt = "Ya está pagado.";
@@ -470,7 +553,6 @@ function formPago(k) {
     cuerpo = `<div class="aviso info">${txt}</div>
       <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cerrar</button><button type="button" class="btn" data-accion="pago-deshacer">Deshacer</button></div>`;
   } else {
-    const despuesCorte = p.corte && C.hoyLocal() > p.corte;
     cuerpo = `
       <div class="campo"><span>¿Qué pasó con este pago?</span>
         <div class="opciones">
@@ -493,11 +575,12 @@ function formPago(k) {
         <label class="campo" for="p-monto">Cambiar el monto de este pago<input id="p-monto" inputmode="decimal" value="${esc(p.monto)}"></label>
         <button type="button" class="btn ghost" data-accion="pago-monto">Guardar</button>
       </div>
+      ${c.tipo === "tarjeta" ? `<button type="button" class="btn ghost block" data-compra-nueva="${esc(c.id)}">+ Agregar una compra con esta tarjeta</button>
+        <p class="hint">Pones la fecha y si es a meses, y se suma sola al estado de cuenta que le toca.</p>` : `
       <div class="linea">
         <label class="campo" for="p-gasto">¿Gastaste más? Súmalo aquí<input id="p-gasto" inputmode="decimal" placeholder="¿Cuánto?"></label>
         <button type="button" class="btn ghost" data-accion="pago-gasto">Sumar</button>
-      </div>
-      ${despuesCorte && sig ? `<p class="hint">Lo que gastes después del corte (${C.fmt(p.corte)}) va en el pago del ${C.fmt(sig.pago)}: ábrelo y súmalo ahí.</p>` : ""}
+      </div>`}
       <p class="error" id="p-error" hidden></p>
       <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cerrar</button></div>`;
   }
@@ -525,7 +608,8 @@ function accionPago(accion) {
   } else if (accion === "pago-monto") {
     const x = numero($("#p-monto").value);
     if (!(x >= 0)) return fallo("Escribe el monto como número, por ejemplo 1500.");
-    c.montos = { ...(c.montos || {}), [clave]: redondear(x) }; msg = "Monto actualizado";
+    // el total que escribe la persona ya incluye las compras registradas
+    c.montos = { ...(c.montos || {}), [clave]: redondear(Math.max(0, x - p.enCompras)) }; msg = "Monto actualizado";
   } else if (accion === "pago-gasto") {
     const x = numero($("#p-gasto").value);
     if (!(x > 0)) return fallo("Escribe cuánto gastaste de más.");
@@ -586,6 +670,15 @@ function normalizar(d) {
       pago_estimado: num(c.pago_estimado, 0, 1e9, 0), deuda_total: num(c.deuda_total, 0, 1e10, null),
       montos: montos(c.montos), pagados: fechas(c.pagados), cubiertos: fechas(c.cubiertos), pospuestos: fechas(c.pospuestos), ajustes: {},
     };
+    if (tipo === "tarjeta") {
+      const ids = new Set();
+      o.compras = (Array.isArray(c.compras) ? c.compras : []).filter(x => x && typeof x === "object" && fecha(x.fecha)).slice(0, 300).map(x => {
+        let cid = String(x.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40);
+        while (!cid || ids.has(cid)) cid = nuevoId();
+        ids.add(cid);
+        return { id: cid, fecha: x.fecha, descripcion: String(x.descripcion ?? "").trim().slice(0, 60), monto: num(x.monto, 0, 1e9, 0), meses: ent(x.meses, 1, 48, 1) };
+      });
+    }
     if (REGLAS.includes(c.regla_pago)) o.regla_pago = c.regla_pago;
     if (tipo === "tarjeta") {
       o.dia_corte = ent(c.dia_corte, 1, 31, 1);
@@ -632,6 +725,13 @@ document.addEventListener("click", async e => {
   if (b.dataset.ir) { tab = b.dataset.ir; render(); return; }
   if (b.dataset.pagar) { const { c, clave } = buscarPago(b.dataset.pagar); c.pagados = [...new Set([...(c.pagados || []), clave])]; guardar(`${c.nombre}: pagado`); return; }
   if (b.dataset.abrir) { formPago(b.dataset.abrir); return; }
+  if (b.dataset.compraNueva) { const c = S.cuentas.find(x => x.id === b.dataset.compraNueva); if (c) formCompra(c); return; }
+  if (b.dataset.compra) {
+    const [cid, kid] = b.dataset.compra.split("|"), c = S.cuentas.find(x => x.id === cid);
+    const k = c && (c.compras || []).find(x => x.id === kid);
+    if (k) formCompra(c, k);
+    return;
+  }
   if (b.dataset.op) {
     dlg.querySelectorAll("[data-panel]").forEach(e => e.hidden = e.dataset.panel !== b.dataset.op);
     dlg.querySelectorAll("[data-op]").forEach(x => x.classList.toggle("activo", x === b));
@@ -651,6 +751,12 @@ document.addEventListener("click", async e => {
     case "import-si": {
       const d = importEnEspera; importEnEspera = null; cerrar();
       if (d) { S = d; tab = "inicio"; guardar(usuario ? "Tus datos se guardaron en tu cuenta" : "Datos cargados"); }
+      break;
+    }
+    case "borrar-compra": {
+      const f = $("#f-compra"), c = S.cuentas.find(x => x.id === f.dataset.cuenta);
+      if (b.dataset.seguro) { c.compras = (c.compras || []).filter(x => x.id !== f.dataset.id); cerrar(); guardar("Compra eliminada"); }
+      else { b.dataset.seguro = "1"; b.textContent = "Toca otra vez para eliminar"; }
       break;
     }
     case "borrar-cuenta": {
@@ -695,6 +801,7 @@ document.addEventListener("submit", e => {
     op.catch(errorLogin);
   }
   else if (f.id === "f-ingreso") guardarIngreso();
+  else if (f.id === "f-compra") guardarCompra(f);
   else if (f.id === "f-cuenta") guardarCuenta(f);
   else if (f.id === "f-importar") {
     try { S = leerRespaldo($("#r-texto").value); cerrar(); tab = "inicio"; guardar("Respaldo cargado"); }

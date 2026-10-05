@@ -61,6 +61,36 @@
     return add(corte, Number(c.dias_despues_corte || 20));
   }
 
+  // Corte en el que entra una compra: el del mes de la compra si fue ese día o antes;
+  // si no, el del mes siguiente.
+  function primerCorte(c, fecha) {
+    const f = typeof fecha === "string" ? parse(fecha) : fecha;
+    const este = enMes(Y(f), M(f), c.dia_corte);
+    if (f <= este) return este;
+    const [y, m] = sumarMes(Y(f), M(f));
+    return enMes(y, m, c.dia_corte);
+  }
+  // Mensualidades de una compra: [{corte, numero, cuota}] (la última ajusta los centavos).
+  function cuotasDeCompra(c, compra) {
+    const n = Math.max(1, Number(compra.meses) || 1), total = Number(compra.monto) || 0;
+    const base = Math.floor((total / n) * 100) / 100, primero = primerCorte(c, compra.fecha), out = [];
+    for (let k = 0; k < n; k++) {
+      const [y, m] = sumarMes(Y(primero), M(primero), k);
+      const cuota = k === n - 1 ? Math.round((total - base * (n - 1)) * 100) / 100 : base;
+      out.push({ corte: enMes(y, m, c.dia_corte), numero: k + 1, de: n, cuota });
+    }
+    return out;
+  }
+  // Compras que caen en el estado de cuenta con este corte.
+  function comprasDelCorte(c, corte) {
+    const res = [];
+    for (const compra of c.compras || []) {
+      const q = cuotasDeCompra(c, compra).find(x => +x.corte === +corte);
+      if (q) res.push({ compra, ...q });
+    }
+    return res;
+  }
+
   function calcularPagos(cfg, desde, hasta) {
     const reglaG = cfg.regla_pago || "siguiente_habil", fer = cfg.feriados_mexico !== false, res = [];
     const agregar = (c, corte, lim) => {
@@ -70,9 +100,13 @@
       let urgente = false;
       if (pago < desde) { pago = desde; urgente = true; }
       const montos = c.montos || {};
+      // monto = lo normal de ese estado de cuenta + las compras registradas que caen en él
+      const base = clave in montos ? Number(montos[clave]) : Number(c.pago_estimado || 0);
+      const compras = corte ? comprasDelCorte(c, corte) : [];
+      const enCompras = Math.round(compras.reduce((t, x) => t + x.cuota, 0) * 100) / 100;
       res.push({
         cuenta: c, nombre: c.nombre, corte, limite: lim, pago, clave, urgente,
-        monto: clave in montos ? Number(montos[clave]) : Number(c.pago_estimado || 0),
+        base, compras, enCompras, monto: Math.round((base + enCompras) * 100) / 100,
         estimado: !(clave in montos),
         pagado: (c.pagados || []).includes(clave),
         pospuesto: (c.pospuestos || []).includes(clave),  // no se pudo pagar; el monto pasó al siguiente
@@ -228,6 +262,6 @@
     return L.map(fold).join("\r\n") + "\r\n";
   }
 
-  g.Calc = { plan, ics, calcularPagos, calcularCobros, fmt, dinero, iso, parse, add, wd, Y, M, DD, diasEntre, hoyLocal,
+  g.Calc = { plan, ics, calcularPagos, calcularCobros, cuotasDeCompra, primerCorte, limiteDeCorte, fmt, dinero, iso, parse, add, wd, Y, M, DD, diasEntre, hoyLocal,
     DIAS_TXT, DIAS_LARGO, MESES, MESES_LARGO, D };
 })(typeof window !== "undefined" ? window : globalThis);
