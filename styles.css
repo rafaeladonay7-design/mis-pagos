@@ -245,4 +245,10 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .desglose .linea-cuenta.total { font-size: 15px; }
 
 /* pantalla fija: sin zoom por doble toque */
-html, body { touch-action: pan-x pan-y; }
+html, body { touch-action: pan-y; }
+
+/* ventana fija: el fondo no se mueve y la ventana no cambia de tamaño con la barra de Safari */
+body.fijo { position: fixed; left: 0; right: 0; width: 100%; overflow: hidden; }
+dialog { max-height: calc(100vh - 40px); max-height: calc(100svh - 40px); overscroll-behavior: contain; touch-action: pan-y;
+  -webkit-overflow-scrolling: touch; }
+dialog::backdrop { touch-action: none; }

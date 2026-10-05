@@ -331,8 +331,29 @@ function ajustes() {
 
 // ---------- formularios ----------
 const dlg = $("#dlg");
-function abrir(html) { dlg.innerHTML = html; dlg.showModal(); const f = dlg.querySelector("input:not([type=radio]), select"); if (f && window.matchMedia("(pointer:fine)").matches) f.focus(); }
-function cerrar() { dlg.close(); dlg.innerHTML = ""; }
+// Mientras una ventana está abierta, la pantalla de atrás queda fija (en iPhone se seguía moviendo).
+let scrollGuardado = 0;
+function bloquearFondo() {
+  if (document.body.classList.contains("fijo")) return;
+  scrollGuardado = window.scrollY;
+  document.body.style.top = `-${scrollGuardado}px`;
+  document.body.classList.add("fijo");
+}
+function liberarFondo() {
+  if (!document.body.classList.contains("fijo")) return;
+  document.body.classList.remove("fijo");
+  document.body.style.top = "";
+  window.scrollTo(0, scrollGuardado);
+}
+function abrir(html) {
+  dlg.innerHTML = html;
+  if (!dlg.open) { bloquearFondo(); dlg.showModal(); }  // si ya estaba abierta, solo cambia el contenido
+  dlg.scrollTop = 0;
+  const f = dlg.querySelector("input:not([type=radio]), select");
+  if (f && window.matchMedia("(pointer:fine)").matches) f.focus();
+}
+function cerrar() { if (dlg.open) dlg.close(); dlg.innerHTML = ""; liberarFondo(); }
+dlg.addEventListener("close", liberarFondo);
 
 function formIngreso() {
   const ing = S.ingreso;
