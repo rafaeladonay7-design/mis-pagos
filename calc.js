@@ -219,7 +219,9 @@
     // la "vuelta": desde que empiezas a contar hasta que pagaste una vez cada cuenta
     // Cada vuelta empieza en $0: suma cada cobro y resta cada pago el día que se paga.
     const pend = todos.filter(p => !p.pagado && !p.pospuesto && !p.cubierto && p.pago >= inicio && p.monto > 0);
-    const detalle = vueltas(pend, inicio).filter(v => v.fin <= add(hasta, 35)).map(v => {
+    // solo vueltas completas: los pagos se calculan 35 días más allá, así que una vuelta
+    // que termina antes de 'hasta' ya tiene el pago de cada cuenta
+    const detalle = vueltas(pend, inicio).filter(v => v.fin <= hasta).map(v => {
       const cobrosV = cobrosTodos.filter(c => c >= v.desde && c <= v.fin);
       const ev = [...cobrosV.map(c => ({ fecha: c, tipo: "cobro", nombre: "Cobro", monto: ingreso })),
                   ...v.pagos.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.monto, pago: p }))]
@@ -230,7 +232,26 @@
       return { desde: v.desde, fin: v.fin, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas, pagos: v.pagos, eventos: ev, minimo };
     });
     const vuelta = detalle[0] || null;
-    return { hoy, inicio, ingreso, pagos, cobros, sinCobro, vuelta, vueltas: detalle };
+
+    // Por mes de calendario. "guarda" es lo que hay que dejar para que al mes
+    // siguiente no le falte dinero antes de que lleguen sus propios cobros.
+    const evMes = (y, m) => [
+      ...cobrosTodos.filter(c => Y(c) === y && M(c) === m).map(c => ({ fecha: c, delta: ingreso, cobro: true })),
+      ...pend.filter(p => Y(p.pago) === y && M(p.pago) === m).map(p => ({ fecha: p.pago, delta: -p.monto, pago: p })),
+    ].sort((a, b) => a.fecha - b.fecha || b.delta - a.delta);
+    const faltaAlInicio = ev => { let s = 0, min = 0; for (const e of ev) { s += e.delta; min = Math.min(min, s); } return -min; };
+    const porMes = [];
+    let [y, m] = [Y(inicio), M(inicio)], recibe = 0;
+    for (let i = 0; i < 4; i++) {
+      const ev = evMes(y, m), [y2, m2] = sumarMes(y, m);
+      const cobrasM = ev.filter(e => e.cobro).reduce((t, e) => t + e.delta, 0);
+      const pagasM = -ev.filter(e => e.pago).reduce((t, e) => t + e.delta, 0);
+      const guarda = faltaAlInicio(evMes(y2, m2));
+      porMes.push({ y, m, cobros: ev.filter(e => e.cobro).length, cobras: cobrasM, pagas: pagasM,
+        pagos: ev.filter(e => e.pago).map(e => e.pago), recibe, guarda, libre: cobrasM - pagasM + recibe - guarda });
+      recibe = guarda; [y, m] = [y2, m2];
+    }
+    return { hoy, inicio, ingreso, pagos, cobros, sinCobro, vuelta, vueltas: detalle, porMes };
   }
 
   // ---------- calendario (.ics) ----------

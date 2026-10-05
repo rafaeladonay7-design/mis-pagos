@@ -222,7 +222,31 @@ function cobrosPorVuelta(P) {
     if (v.minimo < -0.005) h += `<div class="aviso">En esta vuelta hay un pago antes de que te alcance. Revisa los renglones que dicen “te faltan”.</div>`;
     h += `</section>`;
   });
+  h += porMesHtml(P);
   return h;
+}
+
+// Del 1 al último día de cada mes: lo que cobras, lo que pagas y lo que hay que
+// guardar para que al mes siguiente no le falte antes de sus propios cobros.
+function porMesHtml(P) {
+  const meses = P.porMes.filter(x => x.cobros || x.pagos.length).slice(0, 3);
+  if (!meses.length) return "";
+  const nombre = x => C.MESES_LARGO[x.m - 1], cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  let h = `<section class="sec"><div class="sec-head"><h2>Por mes</h2><span class="hint">del 1 al último día</span></div>`;
+  meses.forEach((x, i) => {
+    const sig = C.MESES_LARGO[x.m % 12];
+    h += `<div class="card pad stack vuelta num">
+      <div class="sec-head"><h3>${cap(nombre(x))}</h3><span class="hint">${x.cobros} ${x.cobros === 1 ? "cobro" : "cobros"}</span></div>
+      <div class="linea-cuenta"><span>Cobras</span><b>${C.dinero(x.cobras)}</b></div>
+      <div class="linea-cuenta"><span>Pagas${x.pagos.length ? ` (${x.pagos.map(p => esc(p.nombre)).join(", ")})` : ""}</span><b>− ${C.dinero(x.pagas)}</b></div>
+      ${x.recibe > 0.005 ? `<div class="linea-cuenta"><span>Guardado del mes anterior</span><b>+ ${C.dinero(x.recibe)}</b></div>` : ""}
+      ${x.guarda > 0.005 ? `<div class="linea-cuenta"><span>Guarda para ${sig}</span><b>− ${C.dinero(x.guarda)}</b></div>` : ""}
+      <div class="linea-cuenta total"><span>Te queda libre</span><b>${C.dinero(x.libre)}</b></div>
+      ${x.guarda > 0.005 ? `<p class="hint">En ${sig} hay pagos antes de que te alcancen sus cobros; por eso guardas ${C.dinero(x.guarda)} de ${nombre(x)}.</p>` : ""}
+      ${x.libre < -0.005 ? `<div class="aviso">Este mes no te alcanza: te faltan ${C.dinero(-x.libre)}.</div>` : ""}
+    </div>`;
+  });
+  return h + `</section>`;
 }
 
 function cobrosPorSemana(P) {
