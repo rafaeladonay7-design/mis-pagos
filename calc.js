@@ -61,19 +61,28 @@
     return add(corte, Number(c.dias_despues_corte || 20));
   }
 
-  // Corte en el que entra una compra: el del mes de la compra si fue ese día o antes;
-  // si no, el del mes siguiente.
+  // Corte en el que entra una compra: el del mes de la compra si fue antes de ese día;
+  // si fue el mismo día del corte o después, el del mes siguiente (lo del día del corte
+  // el banco lo registra al día siguiente).
   function primerCorte(c, fecha) {
     const f = typeof fecha === "string" ? parse(fecha) : fecha;
     const este = enMes(Y(f), M(f), c.dia_corte);
-    if (f <= este) return este;
+    if (f < este) return este;
     const [y, m] = sumarMes(Y(f), M(f));
     return enMes(y, m, c.dia_corte);
+  }
+  // Las mensualidades que ya traías y las compras pasadas a meses empiezan en el corte
+  // que se eligió (guardado en 'corte', o en 'fecha' en las de antes); las demás, según su fecha.
+  function corteInicial(c, compra) {
+    const fijo = compra.corte || ((compra.existente || compra.de_estado) && compra.fecha);
+    if (!fijo) return primerCorte(c, compra.fecha);
+    const f = parse(fijo);
+    return enMes(Y(f), M(f), c.dia_corte);
   }
   // Mensualidades de una compra: [{corte, numero, cuota}] (la última ajusta los centavos).
   function cuotasDeCompra(c, compra) {
     const n = Math.max(1, Number(compra.meses) || 1), total = Number(compra.monto) || 0;
-    const base = Math.floor((total / n) * 100) / 100, primero = primerCorte(c, compra.fecha), out = [];
+    const base = Math.floor((total / n) * 100) / 100, primero = corteInicial(c, compra), out = [];
     for (let k = 0; k < n; k++) {
       const [y, m] = sumarMes(Y(primero), M(primero), k);
       const cuota = k === n - 1 ? Math.round((total - base * (n - 1)) * 100) / 100 : base;

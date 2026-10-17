@@ -43,7 +43,7 @@ let toastTimer;
 function toast(txt) {
   const t = $("#toast");
   t.textContent = txt; t.classList.add("on");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2400);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), txt.length > 50 ? 4000 : 2400);
 }
 
 // ---------- utilidades de vista ----------
@@ -144,12 +144,7 @@ function inicio() {
   if (deuda > 0) h += `<div class="tile" style="grid-column:1/-1"><span class="lbl">Deuda total</span><span class="big num">${C.dinero(deuda)}</span><span class="sub">suma de lo que debes en tus cuentas</span></div>`;
   h += `</section>`;
 
-  if (V) h += `<section class="card pad stack vuelta num" aria-label="Cuenta hasta tu último pago">
-    <div class="sec-head"><h3>Del ${C.fmt(V.desde)} al ${C.fmt(V.fin)}</h3><span class="hint">hasta pagar todo una vez</span></div>
-    <div class="linea-cuenta"><span>Cobras (${V.cobros} ${V.cobros === 1 ? "cobro" : "cobros"})</span><b>${C.dinero(V.cobras)}</b></div>
-    <div class="linea-cuenta"><span>Pagas (${V.pagos.map(p => esc(p.nombre)).join(", ")})</span><b>− ${C.dinero(V.pagas)}</b></div>
-    <div class="linea-cuenta total"><span>Te sobra</span><b>${C.dinero(V.sobra)}</b></div>
-  </section>`;
+  h += proximosMeses(C.plan(S, hoy, DIAS_MESES));
   if (S.modo_reparto === "al_final") for (const p of P.sinCobro) h += `<div class="aviso">Antes de tu próximo cobro tienes que pagar ${esc(p.nombre)}: te faltan ${C.dinero(p.falta)}.</div>`;
   if (S.modo_reparto === "al_final") {
     const negativos = P.cobros.filter(c => c.libre < -0.005);
@@ -164,6 +159,39 @@ function inicio() {
   }
   h += `</ul></section>`;
   return h;
+}
+
+// Cuántos días hacia adelante se ven los próximos meses.
+const DIAS_MESES = 200;
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+// El periodo (vuelta) donde se paga el estado de cuenta con esta fecha límite.
+const periodoDe = (P, cuentaId, clave) => P.vueltas.find(v => v.pagos.some(p => p.cuenta.id === cuentaId && p.clave === clave));
+const textoSobra = x => x < -0.005 ? `te faltan ${C.dinero(-x)}` : `te sobran ${C.dinero(x)}`;
+
+// Cada periodo junta los cobros hasta pagar una vez cada cuenta; se nombra por el mes en que termina.
+function proximosMeses(P) {
+  if (!P.vueltas.length) return "";
+  let h = `<section class="sec"><div class="sec-head"><h2>Próximos meses</h2><span class="hint">toca un mes para ver el detalle</span></div>
+    <p class="hint">Cada mes junta tus cobros hasta pagar una vez cada cuenta. Cambia solo cuando agregas compras o montos.</p><div class="card">`;
+  P.vueltas.forEach((v, i) => {
+    const cobs = v.eventos.filter(e => e.tipo === "cobro");
+    const rango = cobs.length > 1 ? `${C.fmt(cobs[0].fecha)} – ${C.fmt(cobs[cobs.length - 1].fecha)}` : cobs.length ? C.fmt(cobs[0].fecha) : "";
+    const neg = v.sobra < -0.005;
+    h += `<details class="periodo"${i === 0 ? " open" : ""}><summary>
+      <span class="pnom">${cap(C.MESES_LARGO[C.M(v.fin) - 1])}</span>
+      <span class="pdet">${v.cobros} ${v.cobros === 1 ? "cobro" : "cobros"}${rango ? ` · ${rango}` : ""}</span>
+      <span class="psobra num${neg ? " neg" : ""}"><small>${neg ? "te faltan" : "te sobra"}</small>${C.dinero(Math.abs(v.sobra))}</span></summary>
+      <div class="pcuerpo num">
+        <div class="linea-cuenta"><span>Cobras</span><b>${C.dinero(v.cobras)}</b></div>
+        ${v.pagos.map(p => `<div class="linea-cuenta"><span>${esc(p.nombre)} · ${C.fmt(p.pago)}${p.compras.length
+          ? `<small>incluye ${p.compras.map(x => `${esc(x.compra.descripcion || "Compra")}${x.de > 1 ? ` ${x.numero}/${x.de}` : ""} ${C.dinero(x.cuota)}`).join(", ")}</small>` : ""}</span>
+          <b>− ${p.estimado ? "~" : ""}${C.dinero(p.monto)}</b></div>`).join("")}
+        <div class="linea-cuenta total"><span>${neg ? "Te faltan" : "Te sobra"}</span><b>${C.dinero(Math.abs(v.sobra))}</b></div>
+        ${v.minimo < -0.005 ? `<div class="aviso">Hay un pago antes de que te alcance: te faltan ${C.dinero(-v.minimo)} en algún momento. Revisa la pestaña Cobros.</div>` : ""}
+        ${v.pagos.some(p => p.estimado) ? `<p class="hint">~ monto estimado: cambia cuando llegue tu estado de cuenta.</p>` : ""}
+      </div></details>`;
+  });
+  return h + `</div></section>`;
 }
 
 function filaPago(p, hoy) {
@@ -231,7 +259,7 @@ function cobrosPorVuelta(P) {
 function porMesHtml(P) {
   const meses = P.porMes.filter(x => x.cobros || x.pagos.length).slice(0, 3);
   if (!meses.length) return "";
-  const nombre = x => C.MESES_LARGO[x.m - 1], cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const nombre = x => C.MESES_LARGO[x.m - 1];
   let h = `<section class="sec"><div class="sec-head"><h2>Por mes</h2><span class="hint">del 1 al último día</span></div>`;
   meses.forEach((x, i) => {
     const sig = C.MESES_LARGO[x.m % 12];
@@ -426,7 +454,7 @@ function formMensualidad(c) {
     const cuota = numero($("#n-cuota").value), n = parseInt($("#n-faltan").value, 10), desde = ciclos.find(p => p.clave === $("#n-desde").value);
     const caja = $("#n-vista");
     if (!(cuota > 0) || !(n >= 1 && n <= 48) || !desde) { caja.innerHTML = `<p class="hint">Pon la mensualidad y cuántas te faltan para ver cuándo terminas.</p>`; return; }
-    const cuotas = C.cuotasDeCompra(c, { fecha: C.iso(desde.corte), monto: cuota * n, meses: n });
+    const cuotas = C.cuotasDeCompra(c, { fecha: C.iso(desde.corte), corte: C.iso(desde.corte), monto: cuota * n, meses: n });
     const ultima = C.limiteDeCorte(c, cuotas[cuotas.length - 1].corte);
     const incl = $("#n-incluida").checked;
     caja.innerHTML = `<p>${n === 1 ? "Tu última mensualidad" : `Pagas ${C.dinero(cuota)} en ${n} pagos; la última`} vence el <b>${C.fmt(ultima)} ${C.Y(ultima)}</b>.</p>
@@ -447,7 +475,7 @@ function guardarMensualidad(form) {
   const ciclos = C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, 1600));
   const desde = ciclos.find(p => p.clave === $("#n-desde").value);
   if (!desde) return fallo("Elige en qué pago va la primera.");
-  const compra = { id: nuevoId(), fecha: C.iso(desde.corte), descripcion: $("#n-desc").value.trim().slice(0, 60) || "Mensualidades", monto: redondear(cuota * n), meses: n };
+  const compra = { id: nuevoId(), fecha: C.iso(desde.corte), corte: C.iso(desde.corte), descripcion: $("#n-desc").value.trim().slice(0, 60) || "Mensualidades", monto: redondear(cuota * n), meses: n };
   if ($("#n-incluida").checked) {
     // se saca del pago normal para no contarlo dos veces, y se guarda cómo regresarlo
     const normal = Number(c.pago_estimado) || 0, restado = redondear(Math.min(normal, cuota));
@@ -527,17 +555,35 @@ function formCompra(c, compra) {
     const meses = forma === "meses" ? parseInt($("#k-meses").value, 10) : 1;
     const caja = $("#k-vista");
     if (!(monto > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(f)) { caja.innerHTML = `<p class="hint">Pon el monto y la fecha para ver en qué pagos cae.</p>`; return; }
-    const cuotas = C.cuotasDeCompra(c, { fecha: f, monto, meses });
+    // si no se cambia la fecha, las mensualidades fijas siguen en su corte
+    const cuotas = C.cuotasDeCompra(c, { fecha: f, monto, meses, de_estado: compra.de_estado, corte: compra.corte && f === compra.fecha ? compra.corte : undefined });
     const pago = q => C.limiteDeCorte(c, q.corte);
-    caja.innerHTML = meses > 1
+    const fd = C.parse(f), fijo = compra.de_estado || (compra.corte && f === compra.fecha);
+    const diaDeCorte = !fijo && C.DD(fd) === Math.min(c.dia_corte, new Date(Date.UTC(C.Y(fd), C.M(fd), 0)).getUTCDate());
+    const nota = diaDeCorte ? " Compraste el día del corte, así que entra en el siguiente." : "";
+    caja.innerHTML = (meses > 1
       ? `<p>Pagarás <b class="num">${C.dinero(cuotas[0].cuota)}</b> al mes por ${meses} meses.</p>
-         <p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}. La primera mensualidad vence el ${C.fmt(pago(cuotas[0]))} y la última el ${C.fmt(pago(cuotas[cuotas.length - 1]))}.</p>`
-      : `<p>Se suma completa a tu pago que vence el <b>${C.fmt(pago(cuotas[0]))}</b>.</p><p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}.</p>`;
+         <p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}.${nota} La primera mensualidad vence el ${C.fmt(pago(cuotas[0]))} y la última el ${C.fmt(pago(cuotas[cuotas.length - 1]))}.</p>`
+      : `<p>Se suma completa a tu pago que vence el <b>${C.fmt(pago(cuotas[0]))}</b>.</p><p class="hint">Entra en tu corte del ${C.fmt(cuotas[0].corte)}.${nota}</p>`)
+      + efectoCompra(c, { ...compra, id: compra.id || "_vista", fecha: f, monto, meses, corte: fijo && compra.corte ? compra.corte : undefined }, C.iso(pago(cuotas[0])));
   };
   dlg.querySelectorAll("input[name=k-forma]").forEach(r => r.addEventListener("change", vista));
   ["k-monto", "k-fecha", "k-meses"].forEach(id => $("#" + id).addEventListener("input", vista));
   $("#k-meses").addEventListener("change", vista);
   vista();
+}
+
+// Cuánto te sobraría en el mes donde cae la compra, con y sin ella.
+function efectoCompra(c, compra, clave) {
+  const hoy = C.hoyLocal();
+  const con = { ...S, cuentas: S.cuentas.map(x => x.id !== c.id ? x : { ...x, compras: [...(x.compras || []).filter(k => k.id !== compra.id), compra] }) };
+  const sin = { ...S, cuentas: S.cuentas.map(x => x.id !== c.id ? x : { ...x, compras: (x.compras || []).filter(k => k.id !== compra.id) }) };
+  const ahora = periodoDe(C.plan(sin, hoy, DIAS_MESES), c.id, clave), despues = periodoDe(C.plan(con, hoy, DIAS_MESES), c.id, clave);
+  const cuenta = C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, DIAS_MESES)).find(p => p.clave === clave);
+  if (cuenta && (cuenta.pagado || cuenta.cubierto)) return `<p class="hint">Ese pago ya está marcado como ${cuenta.pagado ? "pagado" : "cubierto"}, así que esta compra no se suma a nada.</p>`;
+  if (!despues) return "";
+  const mes = C.MESES_LARGO[C.M(despues.fin) - 1];
+  return `<p class="num">En ${mes} ${textoSobra(despues.sobra)}${ahora ? ` <span class="hint">(ahora ${C.dinero(ahora.sobra)})</span>` : ""}.</p>`;
 }
 
 function guardarCompra(form) {
@@ -550,6 +596,7 @@ function guardarCompra(form) {
   const meses = dlg.querySelector("input[name=k-forma]:checked").value === "meses" ? parseInt($("#k-meses").value, 10) : 1;
   const previa = (c.compras || []).find(x => x.id === form.dataset.id);
   const compra = { id: form.dataset.id || nuevoId(), fecha: previa && previa.de_estado ? previa.fecha : f, descripcion: $("#k-desc").value.trim().slice(0, 60), monto: redondear(monto), meses };
+  if (previa && previa.corte && f === previa.fecha) compra.corte = previa.corte;
   if (previa && previa.de_estado) {
     // si cambia el monto, el pago de donde salió se ajusta por la diferencia
     compra.de_estado = previa.de_estado;
@@ -559,7 +606,9 @@ function guardarCompra(form) {
   c.compras = [...(c.compras || []).filter(x => x.id !== compra.id), compra];
   cerrar();
   const primera = C.limiteDeCorte(c, C.cuotasDeCompra(c, compra)[0].corte);
-  guardar(meses > 1 ? `Compra a ${meses} meses: la primera vence el ${C.fmt(primera)}` : `Compra sumada a tu pago que vence el ${C.fmt(primera)}`);
+  const v = periodoDe(C.plan(S, C.hoyLocal(), DIAS_MESES), c.id, C.iso(primera));
+  const extra = v ? ` · en ${C.MESES_LARGO[C.M(v.fin) - 1]} ${textoSobra(v.sobra)}` : "";
+  guardar((meses > 1 ? `Compra a ${meses} meses: la primera vence el ${C.fmt(primera)}` : `Compra sumada a tu pago del ${C.fmt(primera)}`) + extra);
 }
 
 function proximoCiclo(c) {
@@ -786,7 +835,7 @@ function aplicarAMeses() {
   if (!(x > 0)) return fallo("Escribe el monto de la compra.");
   if (x > p.base + 0.005) return fallo(`No puede ser más de ${C.dinero(p.base)}, lo que trae ese pago sin contar otras compras.`);
   c.montos = { ...(c.montos || {}), [p.clave]: redondear(p.base - x) };
-  c.compras = [...(c.compras || []), { id: nuevoId(), fecha: C.iso(p.corte), descripcion: $("#m-desc").value.trim().slice(0, 60) || "Pasada a meses", monto: x, meses: n, de_estado: p.clave }];
+  c.compras = [...(c.compras || []), { id: nuevoId(), fecha: C.iso(p.corte), corte: C.iso(p.corte), descripcion: $("#m-desc").value.trim().slice(0, 60) || "Pasada a meses", monto: x, meses: n, de_estado: p.clave }];
   cerrar();
   guardar(`Listo: ${C.dinero(x)} a ${n} meses desde tu pago del ${C.fmt(p.limite)}`);
 }
@@ -881,6 +930,7 @@ function normalizar(d) {
         while (!cid || ids.has(cid)) cid = nuevoId();
         ids.add(cid);
         const o2 = { id: cid, fecha: x.fecha, descripcion: String(x.descripcion ?? "").trim().slice(0, 60), monto: num(x.monto, 0, 1e9, 0), meses: ent(x.meses, 1, 48, 1) };
+        if (fecha(x.corte)) o2.corte = x.corte;  // mensualidades que empiezan en un corte elegido, no según la fecha
         if (fecha(x.de_estado)) o2.de_estado = x.de_estado;  // compra que ya venía en ese estado de cuenta y se pasó a meses
         if (x.existente && typeof x.existente === "object") {  // mensualidades que ya venían dentro del pago normal
           o2.existente = { estimado: num(x.existente.estimado, 0, 1e9, 0), montos: montos(x.existente.montos), fijados: fechas(x.existente.fijados) };

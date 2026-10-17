@@ -253,3 +253,18 @@ body.fijo { position: fixed; left: 0; right: 0; width: 100%; overflow: hidden; }
 dialog { max-height: calc(100vh - 40px); max-height: calc(100svh - 40px); overscroll-behavior: contain; touch-action: pan-y;
   -webkit-overflow-scrolling: touch; }
 dialog::backdrop { touch-action: none; }
+
+/* próximos meses: cada mes se abre para ver el detalle */
+.periodo + .periodo { border-top: 1px solid var(--line); }
+.periodo summary { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 14px 16px; cursor: pointer; }
+.periodo summary::-webkit-details-marker { display: none; }
+.pnom { font-weight: 700; }
+.pnom::after { content: "›"; display: inline-block; margin-left: 6px; color: var(--muted); transition: transform .15s; }
+.periodo[open] .pnom::after { transform: rotate(90deg); }
+.pdet { grid-column: 1; font-size: 13px; color: var(--muted); }
+.psobra { grid-column: 2; grid-row: 1 / span 2; align-self: center; text-align: right; font-family: var(--display); font-size: 19px; font-weight: 700; line-height: 1.1; }
+.psobra small { display: block; font-family: var(--font); font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.psobra.neg { background: var(--fg); color: var(--surface); padding: 4px 8px; border-radius: 8px; }
+.psobra.neg small { color: inherit; }
+.pcuerpo { display: grid; gap: 8px; padding: 0 16px 16px; }
+.pcuerpo .linea-cuenta small { display: block; font-size: 12px; }
