@@ -172,19 +172,19 @@ const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 // El periodo (vuelta) donde se paga el estado de cuenta con esta fecha límite.
 const periodoDe = (P, cuentaId, clave) => P.vueltas.find(v => v.pagos.some(p => p.cuenta.id === cuentaId && p.clave === clave));
 const textoSobra = x => x < -0.005 ? `te faltan ${C.dinero(-x)}` : `te sobran ${C.dinero(x)}`;
+// Un periodo va de su primer cobro hasta el último pago de la vuelta (p. ej. del vie 23 oct al lun 23 nov).
+const nombrePeriodo = v => { const c = v.eventos.find(e => e.tipo === "cobro"); return `${C.fmt(c ? c.fecha : v.desde)} → ${C.fmt(v.fin)}`; };
 
-// Cada periodo junta los cobros hasta pagar una vez cada cuenta; se nombra por el mes en que termina.
+// Cada periodo junta los cobros hasta pagar una vez cada cuenta; se cuenta hasta su último pago, no por mes.
 function proximosMeses(P) {
   if (!P.vueltas.length) return "";
-  let h = `<section class="sec"><div class="sec-head"><h2>Próximos meses</h2><span class="hint">toca un mes para ver el detalle</span></div>
-    <p class="hint">Cada mes junta tus cobros hasta pagar una vez cada cuenta. Cambia solo cuando agregas compras o montos.</p><div class="card">`;
+  let h = `<section class="sec"><div class="sec-head"><h2>Periodos de pago</h2><span class="hint">toca uno para ver el detalle</span></div>
+    <p class="hint">Cada periodo junta tus cobros hasta pagar una vez cada cuenta y termina con tu último pago. Cambia solo cuando agregas compras o montos.</p><div class="card">`;
   P.vueltas.forEach((v, i) => {
-    const cobs = v.eventos.filter(e => e.tipo === "cobro");
-    const rango = cobs.length > 1 ? `${C.fmt(cobs[0].fecha)} – ${C.fmt(cobs[cobs.length - 1].fecha)}` : cobs.length ? C.fmt(cobs[0].fecha) : "";
     const neg = v.sobra < -0.005;
     h += `<details class="periodo"${i === 0 ? " open" : ""}><summary>
-      <span class="pnom">${cap(C.MESES_LARGO[C.M(v.fin) - 1])}</span>
-      <span class="pdet">${v.cobros} ${v.cobros === 1 ? "cobro" : "cobros"}${rango ? ` · ${rango}` : ""}</span>
+      <span class="pnom">${nombrePeriodo(v)}</span>
+      <span class="pdet">${v.cobros} ${v.cobros === 1 ? "cobro" : "cobros"} · termina con ${esc(v.pagos[v.pagos.length - 1].nombre)}</span>
       <span class="psobra num${neg ? " neg" : ""}"><small>${neg ? "te faltan" : "te sobra"}</small>${C.dinero(Math.abs(v.sobra))}</span></summary>
       <div class="pcuerpo num">
         <div class="linea-cuenta"><span>Cobras</span><b>${C.dinero(v.cobras)}</b></div>
@@ -595,8 +595,7 @@ function efectoCompra(c, compra, clave) {
   const cuenta = C.calcularPagos({ ...S, cuentas: [c] }, hoy, C.add(hoy, DIAS_MESES)).find(p => p.clave === clave);
   if (cuenta && (cuenta.pagado || cuenta.cubierto)) return `<p class="hint">Ese pago ya está marcado como ${cuenta.pagado ? "pagado" : "cubierto"}, así que esta compra no se suma a nada.</p>`;
   if (!despues) return "";
-  const mes = C.MESES_LARGO[C.M(despues.fin) - 1];
-  return `<p class="num">En ${mes} ${textoSobra(despues.sobra)}${ahora ? ` <span class="hint">(ahora ${C.dinero(ahora.sobra)})</span>` : ""}.</p>`;
+  return `<p class="num">Del ${nombrePeriodo(despues).replace(" → ", " al ")} ${textoSobra(despues.sobra)}${ahora ? ` <span class="hint">(ahora ${C.dinero(ahora.sobra)})</span>` : ""}.</p>`;
 }
 
 function guardarCompra(form) {
@@ -620,7 +619,7 @@ function guardarCompra(form) {
   cerrar();
   const primera = C.limiteDeCorte(c, C.cuotasDeCompra(c, compra)[0].corte);
   const v = periodoDe(C.plan(S, C.hoyLocal(), DIAS_MESES), c.id, C.iso(primera));
-  const extra = v ? ` · en ${C.MESES_LARGO[C.M(v.fin) - 1]} ${textoSobra(v.sobra)}` : "";
+  const extra = v ? ` · del ${nombrePeriodo(v).replace(" → ", " al ")} ${textoSobra(v.sobra)}` : "";
   guardar((meses > 1 ? `Compra a ${meses} meses: la primera vence el ${C.fmt(primera)}` : `Compra sumada a tu pago del ${C.fmt(primera)}`) + extra);
 }
 
