@@ -48,13 +48,18 @@ function toast(txt) {
 
 // ---------- utilidades de vista ----------
 const FRECUENCIAS = { semanal: "Cada semana", catorcenal: "Cada 14 días", quincenal: "Cada quincena (15 y último día)", mensual: "Cada mes" };
-function textoIngreso(ing) {
+function textoIngresoBase(ing) {
   if (!ing.monto) return "Sin configurar";
   const m = C.dinero(Number(ing.monto));
   if (ing.frecuencia === "semanal") return `${m} cada ${C.DIAS_LARGO[ing.dia]}`;
   if (ing.frecuencia === "catorcenal") return `${m} cada 14 días`;
   if (ing.frecuencia === "quincenal") return `${m} cada quincena`;
   return `${m} el día ${ing.dia_mes} de cada mes`;
+}
+// "… desde el 26 oct (antes $2,160)" mientras el cambio de sueldo no llega
+function textoIngreso(ing) {
+  const t = textoIngresoBase(ing);
+  return ing.desde && ing.desde > C.iso(C.hoyLocal()) ? `${t} desde el ${C.fmt(C.parse(ing.desde))} (antes ${C.dinero(Number(ing.monto_antes))})` : t;
 }
 function textoCuenta(c) {
   if (c.tipo === "tarjeta") {
@@ -137,7 +142,7 @@ function inicio() {
   h += proximo
     ? `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big num">${C.dinero(proximo.monto)}</span><span class="sub">${esc(proximo.nombre)} · ${C.fmt(proximo.pago)} (${cuando(hoy, proximo.pago)})</span></div>`
     : `<div class="tile main"><span class="lbl">Próximo pago</span><span class="big">Nada pendiente</span></div>`;
-  if (proxCobro && S.modo_reparto === "al_final") h += `<div class="tile"><span class="lbl">Libre el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.libre)}</span><span class="sub">de ${C.dinero(P.ingreso)}</span></div>`;
+  if (proxCobro && S.modo_reparto === "al_final") h += `<div class="tile"><span class="lbl">Libre el ${C.fmt(proxCobro.fecha)}</span><span class="big num">${C.dinero(proxCobro.libre)}</span><span class="sub">de ${C.dinero(proxCobro.monto)}</span></div>`;
   else if (proxCobro && V) h += `<div class="tile"><span class="lbl">Pagas hasta el ${C.fmt(V.fin)}</span><span class="big num">${C.dinero(V.pagas)}</span><span class="sub">${V.pagos.length} ${V.pagos.length === 1 ? "pago" : "pagos"}</span></div>`;
   if (V) h += `<div class="tile"><span class="lbl">Te sobra al ${C.fmt(V.fin)}</span><span class="big num">${C.dinero(V.sobra)}</span><span class="sub">ya con todo pagado</span></div>`;
   else h += `<div class="tile"><span class="lbl">Te sobra en ${C.MESES_LARGO[C.M(mesRef) - 1]}</span><span class="big num">${C.dinero(libreMes)}</span><span class="sub">con todo pagado</span></div>`;
@@ -281,7 +286,7 @@ function cobrosPorSemana(P) {
   let h = `<p class="hint">Cada pago sale de los cobros más cercanos a su fecha; lo que sobra queda en los primeros cobros.${P.inicio > P.hoy ? ` Cuento desde el ${C.fmt(P.inicio)}.` : ""}</p>`;
   h += `<section class="sec"><h2>Cada cobro</h2><div class="card">`;
   for (const c of P.cobros) {
-    const pct = Math.max(0, Math.min(100, (c.total / P.ingreso) * 100));
+    const pct = Math.max(0, Math.min(100, (c.total / c.monto) * 100));
     const cls = c.libre < -0.005 ? "neg" : c.libre < 0.005 ? "cero" : "";
     const desg = c.lista.length ? "Pagas " + c.lista.map(([n, x]) => `${esc(n)} ${C.dinero(x)}`).join(" + ") : "No pagas nada con este cobro";
     h += `<div class="semana"><div class="arriba"><span class="dia">${C.fmt(c.fecha)}</span>
@@ -388,6 +393,8 @@ function formIngreso() {
   abrir(`<form class="form" id="f-ingreso" novalidate>
     <h2>Lo que ganas</h2>
     <label class="campo" for="i-monto">¿Cuánto te pagan cada vez?<input id="i-monto" inputmode="decimal" placeholder="Ej. 3000" value="${esc(ing.monto || "")}"></label>
+    <label class="campo" for="i-desde">¿Desde cuándo te pagan eso? (opcional)<input type="date" id="i-desde" value="${esc(ing.desde && ing.desde > C.iso(C.hoyLocal()) ? ing.desde : "")}"><small>Solo si te van a pagar distinto a partir de una fecha, por ejemplo un aumento. Déjalo vacío si ya te lo pagan.</small></label>
+    <label class="campo" for="i-antes" data-desde>Antes de esa fecha te pagan<input id="i-antes" inputmode="decimal" placeholder="Ej. 2500" value="${esc(ing.monto_antes || "")}"></label>
     <label class="campo" for="i-frec">¿Cada cuándo?<select id="i-frec">${Object.entries(FRECUENCIAS).map(([k, v]) => `<option value="${k}" ${ing.frecuencia === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
     <label class="campo" for="i-dia" data-si="semanal">¿Qué día te pagan?<select id="i-dia">${C.DIAS_LARGO.map((d, i) => `<option value="${i}" ${Number(ing.dia) === i ? "selected" : ""}>${d}</option>`).join("")}</select></label>
     <label class="campo" for="i-inicio" data-si="catorcenal">Fecha de un cobro reciente<input type="date" id="i-inicio" value="${esc(ing.inicio || C.iso(C.hoyLocal()))}"><small>Con esa fecha calculo los siguientes cada 14 días.</small></label>
@@ -396,8 +403,11 @@ function formIngreso() {
     <p class="error" id="i-error" hidden></p>
     <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button></div>
   </form>`);
-  const sync = () => dlg.querySelectorAll("[data-si]").forEach(e => e.hidden = e.dataset.si !== $("#i-frec").value);
-  $("#i-frec").addEventListener("change", sync); sync();
+  const sync = () => {
+    dlg.querySelectorAll("[data-si]").forEach(e => e.hidden = e.dataset.si !== $("#i-frec").value);
+    dlg.querySelector("[data-desde]").hidden = !$("#i-desde").value;
+  };
+  $("#i-frec").addEventListener("change", sync); $("#i-desde").addEventListener("input", sync); $("#i-desde").addEventListener("change", sync); sync();
 }
 
 function guardarIngreso() {
@@ -407,7 +417,10 @@ function guardarIngreso() {
   if (!(monto > 0)) return fallo("Escribe cuánto te pagan, por ejemplo 3000.");
   if (frec === "mensual" && !(diaMes >= 1 && diaMes <= 31)) return fallo("El día del mes debe ser de 1 a 31.");
   if (frec === "catorcenal" && !$("#i-inicio").value) return fallo("Pon la fecha de un cobro reciente.");
+  const desde = $("#i-desde").value, antes = numero($("#i-antes").value);
+  if (desde && !(antes > 0)) return fallo("Escribe cuánto te pagan antes de esa fecha.");
   S.ingreso = { monto, frecuencia: frec, dia: Number($("#i-dia").value), dia_mes: diaMes || 30, inicio: $("#i-inicio").value || C.iso(C.hoyLocal()) };
+  if (desde) Object.assign(S.ingreso, { desde, monto_antes: antes });
   cerrar();
   if (!S.cuentas.length) tab = "cuentas";
   guardar("Ingreso guardado");
@@ -912,6 +925,7 @@ function normalizar(d) {
     frecuencia: Object.keys(FRECUENCIAS).includes(i.frecuencia) ? i.frecuencia : "semanal",
     dia: ent(i.dia, 0, 6, 4), dia_mes: ent(i.dia_mes, 1, 31, 30), inicio: fecha(i.inicio) || C.iso(C.hoyLocal()),
   };
+  if (fecha(i.desde) && num(i.monto_antes, 0, 1e9, 0) > 0) Object.assign(ingreso, { desde: i.desde, monto_antes: num(i.monto_antes, 0, 1e9, 0) });  // sueldo distinto desde esa fecha
   const vistos = new Set();
   const cuentas = d.cuentas.filter(c => c && typeof c === "object").slice(0, 100).map(c => {
     const tipo = c.tipo === "tarjeta" ? "tarjeta" : "fijo";
