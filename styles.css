@@ -268,3 +268,4 @@ dialog::backdrop { touch-action: none; }
 .psobra.neg small { color: inherit; }
 .pcuerpo { display: grid; gap: 8px; padding: 0 16px 16px; }
 .pcuerpo .linea-cuenta small { display: block; font-size: 12px; }
+.pcuerpo .enlace { margin-left: 6px; padding: 0; font-size: 12px; color: var(--muted); }

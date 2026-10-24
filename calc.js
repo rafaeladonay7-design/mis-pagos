@@ -246,15 +246,19 @@
     const detalle = vueltas(delPeriodo, base, cfg.cierre_periodo).filter(v => v.fin >= hoy && v.fin <= hasta).map(v => {
       const cobrosV = cobrosPeriodo.filter(c => c >= v.desde && c <= v.fin);
       const pagosV = v.pagos.filter(p => p.sale > 0.005);
+      // gastos sueltos que registraste (dinero que salió fuera del plan), en su periodo
+      const gastosV = (cfg.gastos || []).filter(g => parse(g.fecha) >= v.desde && parse(g.fecha) <= v.fin);
       const ev = [...cobrosV.map(c => ({ fecha: c, tipo: "cobro", nombre: "Cobro", monto: monto(c) })),
-                  ...pagosV.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.sale, pago: p }))]
+                  ...pagosV.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.sale, pago: p })),
+                  ...gastosV.map(g => ({ fecha: parse(g.fecha), tipo: "gasto", nombre: g.descripcion || "Gasto", monto: Number(g.monto) || 0, gasto: g }))]
         .sort((a, b) => a.fecha - b.fecha || (a.tipo === "cobro" ? -1 : 1));  // el cobro del día entra antes de pagar
       let saldo = 0, minimo = 0;
       for (const e of ev) { saldo += e.tipo === "cobro" ? e.monto : -e.monto; e.saldo = saldo; minimo = Math.min(minimo, saldo); }
       const cobras = cobrosV.reduce((t, c) => t + monto(c), 0), pagas = pagosV.reduce((s, p) => s + p.sale, 0);
+      const gastas = gastosV.reduce((s, g) => s + (Number(g.monto) || 0), 0);
       const cierra = v.pagos.filter(p => +p.pago === +v.fin).pop();
-      return { desde: v.desde, fin: v.fin, cierra: cierra && cierra.nombre, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas,
-        pagos: pagosV, todos: v.pagos, eventos: ev, minimo };
+      return { desde: v.desde, fin: v.fin, cierra: cierra && cierra.nombre, cobros: cobrosV.length, cobras, pagas, gastas, sobra: cobras - pagas - gastas,
+        pagos: pagosV, gastos: gastosV, todos: v.pagos, eventos: ev, minimo };
     });
     const vuelta = detalle[0] || null;
 

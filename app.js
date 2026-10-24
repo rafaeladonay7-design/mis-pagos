@@ -191,12 +191,15 @@ function proximosMeses(P) {
         ${v.pagos.map(p => `<div class="linea-cuenta"><span>${esc(p.nombre)} · ${C.fmt(p.pago)}${p.pagado ? " ✓ pagado" : ""}${p.compras.length
           ? `<small>incluye ${p.compras.map(x => `${esc(x.compra.descripcion || "Compra")}${x.de > 1 ? ` ${x.numero}/${x.de}` : ""} ${C.dinero(x.cuota)}`).join(", ")}</small>` : ""}</span>
           <b>− ${p.estimado && !p.pagado ? "~" : ""}${C.dinero(p.sale)}</b></div>`).join("")}
+        ${v.gastos.map(g => `<div class="linea-cuenta"><span>Gasto: ${esc(g.descripcion || "sin nombre")} · ${C.fmt(C.parse(g.fecha))}
+          <button class="enlace" data-gasto-borrar="${esc(g.id)}">Quitar</button></span><b>− ${C.dinero(Number(g.monto))}</b></div>`).join("")}
         <div class="linea-cuenta total"><span>${neg ? "Te faltan" : "Te sobra"}</span><b>${C.dinero(Math.abs(v.sobra))}</b></div>
         ${v.minimo < -0.005 ? `<div class="aviso">Hay un pago antes de que te alcance: te faltan ${C.dinero(-v.minimo)} en algún momento. Revisa la pestaña Cobros.</div>` : ""}
         ${v.pagos.some(p => p.estimado && !p.pagado) ? `<p class="hint">~ monto estimado: cambia cuando llegue tu estado de cuenta.</p>` : ""}
       </div></details>`;
   });
-  return h + `</div></section>`;
+  return h + `</div><button class="btn ghost block" data-accion="gasto">+ Registrar un gasto</button>
+    <p class="hint">Para dinero que gastaste de tu cobro fuera de tus pagos. Solo se resta del periodo donde cae.</p></section>`;
 }
 
 function filaPago(p, hoy) {
@@ -247,7 +250,7 @@ function cobrosPorVuelta(P) {
     for (const e of v.eventos) {
       const neg = e.saldo < -0.005;
       h += `<div class="mov ${e.tipo}"><span class="mfecha">${C.fmt(e.fecha)}</span>
-        <span class="mnom">${e.tipo === "cobro" ? "Cobro" : `${e.pago.pagado ? "Pagaste" : "Pagas"} ${esc(e.nombre)}`}</span>
+        <span class="mnom">${e.tipo === "cobro" ? "Cobro" : e.tipo === "gasto" ? `Gastaste: ${esc(e.nombre)}` : `${e.pago.pagado ? "Pagaste" : "Pagas"} ${esc(e.nombre)}`}</span>
         <span class="mmonto num">${e.tipo === "cobro" ? "+" : "−"}${C.dinero(e.monto)}</span>
         <span class="msaldo num${neg ? " neg" : ""}">${neg ? `te faltan ${C.dinero(-e.saldo)}` : `llevas ${C.dinero(e.saldo)}`}</span></div>`;
     }
@@ -412,6 +415,31 @@ function formIngreso() {
     dlg.querySelector("[data-desde]").hidden = !$("#i-desde").value;
   };
   $("#i-frec").addEventListener("change", sync); $("#i-desde").addEventListener("input", sync); $("#i-desde").addEventListener("change", sync); sync();
+}
+
+function formGasto() {
+  abrir(`<form class="form" id="f-gasto" novalidate>
+    <h2>Registrar un gasto</h2>
+    <p class="hint">Dinero de tu cobro que se fue en algo que no es un pago de tus cuentas. Se resta del periodo de su fecha.</p>
+    <label class="campo" for="g-desc">¿En qué? (opcional)<input id="g-desc" autocomplete="off" placeholder="Ej. Salida, súper"></label>
+    <div class="dos">
+      <label class="campo" for="g-monto">Monto<input id="g-monto" inputmode="decimal" placeholder="0.00"></label>
+      <label class="campo" for="g-fecha">Fecha<input type="date" id="g-fecha" value="${C.iso(C.hoyLocal())}"></label>
+    </div>
+    <p class="error" id="g-error" hidden></p>
+    <div class="acciones"><button type="button" class="btn ghost" data-accion="cerrar">Cancelar</button><button class="btn">Guardar</button></div>
+  </form>`);
+}
+
+function guardarGasto() {
+  const err = $("#g-error"), fallo = t => { err.textContent = t; err.hidden = false; };
+  const monto = numero($("#g-monto").value), f = $("#g-fecha").value;
+  if (!(monto > 0)) return fallo("Escribe cuánto gastaste, por ejemplo 900.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return fallo("Elige la fecha del gasto.");
+  S.gastos = [...(S.gastos || []), { id: nuevoId(), fecha: f, descripcion: $("#g-desc").value.trim().slice(0, 60), monto: redondear(monto) }];
+  cerrar();
+  const v = C.plan(S, C.hoyLocal(), DIAS_MESES).vueltas.find(v => v.gastos.some(g => g.fecha === f));
+  guardar(v ? `Gasto guardado · del ${nombrePeriodo(v).replace(" → ", " al ")} ${textoSobra(v.sobra)}` : "Gasto guardado");
 }
 
 function guardarIngreso() {
@@ -976,6 +1004,9 @@ function normalizar(d) {
     feriados_mexico: d.feriados_mexico !== false, contar_desde: fecha(d.contar_desde), cuentas,
     modo_reparto: d.modo_reparto === "al_final" ? "al_final" : "primero",
     cierre_periodo: cuentas.some(c => c.id === d.cierre_periodo) ? d.cierre_periodo : null,
+    // gastos sueltos: dinero de un cobro que se fue fuera de los pagos
+    gastos: (Array.isArray(d.gastos) ? d.gastos : []).filter(g => g && typeof g === "object" && fecha(g.fecha) && num(g.monto, 0, 1e9, 0) > 0).slice(0, 500)
+      .map(g => ({ id: String(g.id ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 40) || nuevoId(), fecha: g.fecha, descripcion: String(g.descripcion ?? "").trim().slice(0, 60), monto: num(g.monto, 0, 1e9, 0) })),
   };
 }
 const normalizarSeguro = d => { try { return d ? normalizar(d) : null; } catch { return null; } };
@@ -1002,6 +1033,7 @@ document.addEventListener("click", async e => {
   if (b.dataset.ir) { tab = b.dataset.ir; render(); return; }
   if (b.dataset.pagar) { const { c, clave } = buscarPago(b.dataset.pagar); c.pagados = [...new Set([...(c.pagados || []), clave])]; guardar(`${c.nombre}: pagado`); return; }
   if (b.dataset.abrir) { formPago(b.dataset.abrir); return; }
+  if (b.dataset.gastoBorrar) { S.gastos = (S.gastos || []).filter(g => g.id !== b.dataset.gastoBorrar); guardar("Gasto quitado"); return; }
   if (b.dataset.compraNueva) { const c = S.cuentas.find(x => x.id === b.dataset.compraNueva); if (c) formCompra(c); return; }
   if (b.dataset.mensualidad) { const c = S.cuentas.find(x => x.id === b.dataset.mensualidad); if (c) formMensualidad(c); return; }
   if (b.dataset.compra) {
@@ -1022,6 +1054,7 @@ document.addEventListener("click", async e => {
   switch (b.dataset.accion) {
     case "empezar": S = nuevoEstado(); guardar(); formIngreso(); break;
     case "ingreso": formIngreso(); break;
+    case "gasto": formGasto(); break;
     case "nueva-tarjeta": formCuenta(null, "tarjeta"); break;
     case "nuevo-fijo": formCuenta(null, "fijo"); break;
     case "cerrar": cerrar(); break;
@@ -1095,6 +1128,7 @@ document.addEventListener("submit", e => {
     op.catch(errorLogin);
   }
   else if (f.id === "f-ingreso") guardarIngreso();
+  else if (f.id === "f-gasto") guardarGasto();
   else if (f.id === "f-compra") guardarCompra(f);
   else if (f.id === "f-mensualidad") guardarMensualidad(f);
   else if (f.id === "f-cuenta") guardarCuenta(f);
