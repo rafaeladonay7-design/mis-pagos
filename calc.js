@@ -202,14 +202,15 @@
     return { aparta, sinCobro };
   }
 
-  // Una vuelta va desde 'desde' hasta que cada cuenta se pagó una vez.
-  function vueltas(pendientes, inicio) {
+  // Una vuelta va desde 'desde' hasta el pago de la cuenta que cierra el periodo ('cierre');
+  // sin esa cuenta, hasta que a cada cuenta le tocó pagar una vez.
+  function vueltas(pendientes, inicio, cierre) {
     const out = [];
     let resto = [...pendientes].sort((a, b) => a.pago - b.pago), desde = inicio;
     while (resto.length) {
       const primeros = new Map();
       for (const p of resto) if (!primeros.has(p.cuenta.id)) primeros.set(p.cuenta.id, p);
-      const fin = new Date(Math.max(...[...primeros.values()].map(p => +p.pago)));
+      const fin = primeros.has(cierre) ? primeros.get(cierre).pago : new Date(Math.max(...[...primeros.values()].map(p => +p.pago)));
       out.push({ desde, fin, pagos: resto.filter(p => p.pago <= fin) });
       resto = resto.filter(p => p.pago > fin);
       desde = add(fin, 1);
@@ -230,20 +231,30 @@
       const lista = aparta.get(+c), total = lista.reduce((s, [, x]) => s + x, 0);
       return { fecha: c, monto: monto(c), lista, total, libre: monto(c) - total };
     });
-    // la "vuelta": desde que empiezas a contar hasta que pagaste una vez cada cuenta
-    // Cada vuelta empieza en $0: suma cada cobro y resta cada pago el día que se paga.
     const pend = todos.filter(p => !p.pagado && !p.pospuesto && !p.cubierto && p.pago >= inicio && p.monto > 0);
-    // solo vueltas completas: los pagos se calculan 35 días más allá, así que una vuelta
-    // que termina antes de 'hasta' ya tiene el pago de cada cuenta
-    const detalle = vueltas(pend, inicio).filter(v => v.fin <= hasta).map(v => {
-      const cobrosV = cobrosTodos.filter(c => c >= v.desde && c <= v.fin);
+    // Periodos (vueltas): del día después del pago que cierra uno hasta el pago que cierra el
+    // siguiente. Se cuentan desde 'contar_desde' aunque ya haya pasado, con todos los pagos
+    // (también los ya pagados), para que el periodo actual no pierda los cobros que ya
+    // recibiste ni se mueva su cierre cuando marcas "Ya pagué".
+    const base = cfg.contar_desde && parse(cfg.contar_desde) < inicio ? parse(cfg.contar_desde) : inicio;
+    const delPeriodo = calcularPagos(cfg, base, add(hasta, 35)).filter(p => p.pago >= base);
+    const cobrosPeriodo = calcularCobros(cfg, base, add(hasta, 35));
+    // lo que sale de tu dinero: lo cubierto o pospuesto no; lo pagado en parte, lo que pagaste
+    for (const p of delPeriodo) p.sale = p.pospuesto || p.cubierto ? 0 : p.pagado && p.ajuste && p.ajuste.tipo === "parcial" ? Number(p.ajuste.pagado) || 0 : p.monto;
+    // solo vueltas completas que no han terminado: los pagos se calculan 35 días más allá,
+    // así que una vuelta que termina antes de 'hasta' ya tiene el pago de cada cuenta
+    const detalle = vueltas(delPeriodo, base, cfg.cierre_periodo).filter(v => v.fin >= hoy && v.fin <= hasta).map(v => {
+      const cobrosV = cobrosPeriodo.filter(c => c >= v.desde && c <= v.fin);
+      const pagosV = v.pagos.filter(p => p.sale > 0.005);
       const ev = [...cobrosV.map(c => ({ fecha: c, tipo: "cobro", nombre: "Cobro", monto: monto(c) })),
-                  ...v.pagos.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.monto, pago: p }))]
+                  ...pagosV.map(p => ({ fecha: p.pago, tipo: "pago", nombre: p.nombre, monto: p.sale, pago: p }))]
         .sort((a, b) => a.fecha - b.fecha || (a.tipo === "cobro" ? -1 : 1));  // el cobro del día entra antes de pagar
       let saldo = 0, minimo = 0;
       for (const e of ev) { saldo += e.tipo === "cobro" ? e.monto : -e.monto; e.saldo = saldo; minimo = Math.min(minimo, saldo); }
-      const cobras = cobrosV.reduce((t, c) => t + monto(c), 0), pagas = v.pagos.reduce((s, p) => s + p.monto, 0);
-      return { desde: v.desde, fin: v.fin, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas, pagos: v.pagos, eventos: ev, minimo };
+      const cobras = cobrosV.reduce((t, c) => t + monto(c), 0), pagas = pagosV.reduce((s, p) => s + p.sale, 0);
+      const cierra = v.pagos.filter(p => +p.pago === +v.fin).pop();
+      return { desde: v.desde, fin: v.fin, cierra: cierra && cierra.nombre, cobros: cobrosV.length, cobras, pagas, sobra: cobras - pagas,
+        pagos: pagosV, todos: v.pagos, eventos: ev, minimo };
     });
     const vuelta = detalle[0] || null;
 

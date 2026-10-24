@@ -170,7 +170,7 @@ function inicio() {
 const DIAS_MESES = 200;
 const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
 // El periodo (vuelta) donde se paga el estado de cuenta con esta fecha límite.
-const periodoDe = (P, cuentaId, clave) => P.vueltas.find(v => v.pagos.some(p => p.cuenta.id === cuentaId && p.clave === clave));
+const periodoDe = (P, cuentaId, clave) => P.vueltas.find(v => v.todos.some(p => p.cuenta.id === cuentaId && p.clave === clave));
 const textoSobra = x => x < -0.005 ? `te faltan ${C.dinero(-x)}` : `te sobran ${C.dinero(x)}`;
 // Un periodo va de su primer cobro hasta el último pago de la vuelta (p. ej. del vie 23 oct al lun 23 nov).
 const nombrePeriodo = v => { const c = v.eventos.find(e => e.tipo === "cobro"); return `${C.fmt(c ? c.fecha : v.desde)} → ${C.fmt(v.fin)}`; };
@@ -179,21 +179,21 @@ const nombrePeriodo = v => { const c = v.eventos.find(e => e.tipo === "cobro"); 
 function proximosMeses(P) {
   if (!P.vueltas.length) return "";
   let h = `<section class="sec"><div class="sec-head"><h2>Periodos de pago</h2><span class="hint">toca uno para ver el detalle</span></div>
-    <p class="hint">Cada periodo junta tus cobros hasta pagar una vez cada cuenta y termina con tu último pago. Cambia solo cuando agregas compras o montos.</p><div class="card">`;
+    <p class="hint">Cada periodo junta tus cobros desde el día después de tu último pago${S.cierre_periodo && S.cuentas.some(c => c.id === S.cierre_periodo) ? ` (${esc(S.cuentas.find(c => c.id === S.cierre_periodo).nombre)})` : ""} hasta el siguiente. Cuenta lo que ya cobraste y ya pagaste en el periodo.</p><div class="card">`;
   P.vueltas.forEach((v, i) => {
     const neg = v.sobra < -0.005;
     h += `<details class="periodo"${i === 0 ? " open" : ""}><summary>
       <span class="pnom">${nombrePeriodo(v)}</span>
-      <span class="pdet">${v.cobros} ${v.cobros === 1 ? "cobro" : "cobros"} · termina con ${esc(v.pagos[v.pagos.length - 1].nombre)}</span>
+      <span class="pdet">${v.cobros} ${v.cobros === 1 ? "cobro" : "cobros"} · ${esc(v.todos[0].nombre)} ${C.fmt(v.todos[0].pago).replace(/^\S+ /, "")} → ${esc(v.cierra || "")} ${C.fmt(v.fin).replace(/^\S+ /, "")}</span>
       <span class="psobra num${neg ? " neg" : ""}"><small>${neg ? "te faltan" : "te sobra"}</small>${C.dinero(Math.abs(v.sobra))}</span></summary>
       <div class="pcuerpo num">
         <div class="linea-cuenta"><span>Cobras</span><b>${C.dinero(v.cobras)}</b></div>
-        ${v.pagos.map(p => `<div class="linea-cuenta"><span>${esc(p.nombre)} · ${C.fmt(p.pago)}${p.compras.length
+        ${v.pagos.map(p => `<div class="linea-cuenta"><span>${esc(p.nombre)} · ${C.fmt(p.pago)}${p.pagado ? " ✓ pagado" : ""}${p.compras.length
           ? `<small>incluye ${p.compras.map(x => `${esc(x.compra.descripcion || "Compra")}${x.de > 1 ? ` ${x.numero}/${x.de}` : ""} ${C.dinero(x.cuota)}`).join(", ")}</small>` : ""}</span>
-          <b>− ${p.estimado ? "~" : ""}${C.dinero(p.monto)}</b></div>`).join("")}
+          <b>− ${p.estimado && !p.pagado ? "~" : ""}${C.dinero(p.sale)}</b></div>`).join("")}
         <div class="linea-cuenta total"><span>${neg ? "Te faltan" : "Te sobra"}</span><b>${C.dinero(Math.abs(v.sobra))}</b></div>
         ${v.minimo < -0.005 ? `<div class="aviso">Hay un pago antes de que te alcance: te faltan ${C.dinero(-v.minimo)} en algún momento. Revisa la pestaña Cobros.</div>` : ""}
-        ${v.pagos.some(p => p.estimado) ? `<p class="hint">~ monto estimado: cambia cuando llegue tu estado de cuenta.</p>` : ""}
+        ${v.pagos.some(p => p.estimado && !p.pagado) ? `<p class="hint">~ monto estimado: cambia cuando llegue tu estado de cuenta.</p>` : ""}
       </div></details>`;
   });
   return h + `</div></section>`;
@@ -247,7 +247,7 @@ function cobrosPorVuelta(P) {
     for (const e of v.eventos) {
       const neg = e.saldo < -0.005;
       h += `<div class="mov ${e.tipo}"><span class="mfecha">${C.fmt(e.fecha)}</span>
-        <span class="mnom">${e.tipo === "cobro" ? "Cobro" : `Pagas ${esc(e.nombre)}`}</span>
+        <span class="mnom">${e.tipo === "cobro" ? "Cobro" : `${e.pago.pagado ? "Pagaste" : "Pagas"} ${esc(e.nombre)}`}</span>
         <span class="mmonto num">${e.tipo === "cobro" ? "+" : "−"}${C.dinero(e.monto)}</span>
         <span class="msaldo num${neg ? " neg" : ""}">${neg ? `te faltan ${C.dinero(-e.saldo)}` : `llevas ${C.dinero(e.saldo)}`}</span></div>`;
     }
@@ -336,6 +336,10 @@ function ajustes() {
         <option value="al_final" ${S.modo_reparto === "al_final" ? "selected" : ""}>Al principio, y pagar con los últimos cobros</option>
       </select>
       <small>“Al final” usa cada cobro primero para pagar. “Al principio” te deja libre el dinero de los primeros cobros.</small></label>
+    <label class="campo" for="aj-cierre">Tu periodo cierra con el pago de
+      <select id="aj-cierre"><option value="">Automático (cuando ya pagaste todas una vez)</option>
+        ${S.cuentas.map(c => `<option value="${esc(c.id)}" ${S.cierre_periodo === c.id ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")}</select>
+      <small>El último pago de cada vuelta. El periodo siguiente empieza al día siguiente.</small></label>
     <label class="check"><input type="checkbox" id="aj-feriados" ${S.feriados_mexico !== false ? "checked" : ""}> Contar los días festivos bancarios de México</label>
     <label class="campo" for="aj-desde">Empezar a contar cobros desde
       <input type="date" id="aj-desde" value="${esc(S.contar_desde || "")}">
@@ -971,6 +975,7 @@ function normalizar(d) {
     version: 1, ingreso, regla_pago: REGLAS.includes(d.regla_pago) ? d.regla_pago : "siguiente_habil",
     feriados_mexico: d.feriados_mexico !== false, contar_desde: fecha(d.contar_desde), cuentas,
     modo_reparto: d.modo_reparto === "al_final" ? "al_final" : "primero",
+    cierre_periodo: cuentas.some(c => c.id === d.cierre_periodo) ? d.cierre_periodo : null,
   };
 }
 const normalizarSeguro = d => { try { return d ? normalizar(d) : null; } catch { return null; } };
@@ -1103,6 +1108,7 @@ document.addEventListener("change", e => {
   if (!S) return;
   if (e.target.id === "aj-regla") { S.regla_pago = e.target.value; guardar("Guardado"); }
   if (e.target.id === "aj-modo") { S.modo_reparto = e.target.value; guardar("Guardado"); }
+  if (e.target.id === "aj-cierre") { S.cierre_periodo = e.target.value || null; guardar("Guardado"); }
   if (e.target.id === "aj-feriados") { S.feriados_mexico = e.target.checked; guardar("Guardado"); }
   if (e.target.id === "aj-desde") { S.contar_desde = e.target.value || null; guardar("Guardado"); }
 });
